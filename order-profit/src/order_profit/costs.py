@@ -1,1 +1,377 @@
 """人工补充、货品成本与运费解析。"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Final
+
+import pandas as pd
+
+from order_profit.errors import InputContractError
+from order_profit.inputs import LoadedTable
+from order_profit.models import Issue, Severity, SourceLocation
+from order_profit.normalize import is_missing
+from order_profit.rules import OrderPartitions
+
+SUPPLEMENT_KEYS: Final[list[str]] = ["主订单编号", "商品ID", "商家编码"]
+ACTIVE_SUPPLEMENT_STATUSES: Final[frozenset[str]] = frozenset({"", "已确认", "已同步"})
+
+
+@dataclass(frozen=True, slots=True)
+class SupplementResult:
+    orders: LoadedTable
+    audit: pd.DataFrame
+
+
+@dataclass(frozen=True, slots=True)
+class CostResolutionResult:
+    normal: pd.DataFrame
+    closed_shipped: pd.DataFrame
+    supplement_audit: pd.DataFrame
+    issues: tuple[Issue, ...] = ()
+
+    @property
+    def missing_cost_rows(self) -> int:
+        return int(self.normal["核算成本_分"].isna().sum()) + int(
+            self.closed_shipped["核算成本_分"].isna().sum()
+        )
+
+    @property
+    def missing_freight_rows(self) -> int:
+        return int(self.normal["核算运费_分"].isna().sum()) + int(
+            self.closed_shipped["核算运费_分"].isna().sum()
+        )
+
+
+def _location(row: pd.Series, field: str) -> SourceLocation:
+    source_row = row.get("source_row_number")
+    return SourceLocation(
+        file=row.attrs.get("source_path"),
+        sheet=(str(row.get("source_sheet")) if not is_missing(row.get("source_sheet")) else None),
+        row=(int(source_row) if not is_missing(source_row) else None),
+        field=field,
+    )
+
+
+def _key_tuple(row: pd.Series) -> tuple[str, str, str]:
+    return tuple(str(row[column]) for column in SUPPLEMENT_KEYS)  # type: ignore[return-value]
+
+
+def _apply_supplement_field(
+    result: pd.DataFrame,
+    *,
+    target_index: object,
+    supplement_value: object,
+    existing_value: object,
+    target_column: str,
+    overwrite_existing: bool,
+) -> tuple[bool, str]:
+    if is_missing(supplement_value):
+        return False, "补充字段为空"
+    if not overwrite_existing and not is_missing(existing_value):
+        return False, "目标已有值且未启用覆盖"
+    result.at[target_index, target_column] = int(supplement_value)
+    return True, "已应用"
+
+
+def apply_supplements(
+    orders: LoadedTable,
+    supplements: LoadedTable | None,
+    *,
+    overwrite_existing: bool,
+) -> SupplementResult:
+    """在全量标准化源订单上匹配补充，保留字段级应用审计。"""
+
+    result = orders.data.copy()
+    result.attrs.update(orders.data.attrs)
+    result["补充货品成本_分"] = pd.Series([None] * len(result), index=result.index, dtype=object)
+    result["补充运费_分"] = pd.Series([None] * len(result), index=result.index, dtype=object)
+    result["补充记录源行"] = pd.Series([None] * len(result), index=result.index, dtype=object)
+
+    if supplements is None:
+        return SupplementResult(
+            orders=LoadedTable(result, orders.metadata, orders.issues),
+            audit=pd.DataFrame(),
+        )
+
+    order_key_groups: dict[tuple[str, str, str], list[object]] = {}
+    for index, row in result.iterrows():
+        order_key_groups.setdefault(_key_tuple(row), []).append(index)
+
+    audit_rows: list[dict[str, object]] = []
+    for _, supplement in supplements.data.iterrows():
+        key = _key_tuple(supplement)
+        matched = order_key_groups.get(key, [])
+        if not matched:
+            issue = Issue(
+                code="SUPPLEMENT_TARGET_NOT_FOUND",
+                severity=Severity.ERROR,
+                message="人工补充记录找不到任何源订单",
+                location=_location(supplement, "主订单编号"),
+                raw_value=dict(zip(SUPPLEMENT_KEYS, key, strict=True)),
+                suggestion="核对主订单编号、商品ID和商家编码，匹配在全量源订单中执行",
+            )
+            raise InputContractError(issue.message, code=issue.code, issues=[issue])
+        if len(matched) > 1:
+            issue = Issue(
+                code="SUPPLEMENT_TARGET_NOT_UNIQUE",
+                severity=Severity.ERROR,
+                message="人工补充键匹配到多条源订单明细",
+                location=_location(supplement, "主订单编号"),
+                raw_value={"key": key, "matched_source_rows": matched},
+                suggestion="补充表需增加可唯一定位的明细序号后再运行",
+            )
+            raise InputContractError(issue.message, code=issue.code, issues=[issue])
+
+        target_index = matched[0]
+        status = str(supplement["补充状态"])
+        active = status in ACTIVE_SUPPLEMENT_STATUSES
+        applied_cost = False
+        applied_freight = False
+        cost_reason = "状态不生效"
+        freight_reason = "状态不生效"
+        if active:
+            applied_cost, cost_reason = _apply_supplement_field(
+                result,
+                target_index=target_index,
+                supplement_value=supplement.get("货品成本_分"),
+                existing_value=result.at[target_index, "货品成本_分"],
+                target_column="补充货品成本_分",
+                overwrite_existing=overwrite_existing,
+            )
+            applied_freight, freight_reason = _apply_supplement_field(
+                result,
+                target_index=target_index,
+                supplement_value=supplement.get("运费_分"),
+                existing_value=result.at[target_index, "运费_分"],
+                target_column="补充运费_分",
+                overwrite_existing=overwrite_existing,
+            )
+            result.at[target_index, "补充记录源行"] = int(supplement["source_row_number"])
+
+        audit_rows.append(
+            {
+                **{column: supplement[column] for column in SUPPLEMENT_KEYS},
+                "补充状态": status,
+                "补充表源行": int(supplement["source_row_number"]),
+                "匹配订单源行": int(result.at[target_index, "source_row_number"]),
+                "匹配订单分区": None,
+                "成本已应用": applied_cost,
+                "成本处理原因": cost_reason,
+                "运费已应用": applied_freight,
+                "运费处理原因": freight_reason,
+            }
+        )
+
+    audit = pd.DataFrame(audit_rows)
+    return SupplementResult(
+        orders=LoadedTable(result, orders.metadata, orders.issues),
+        audit=audit,
+    )
+
+
+def _build_cost_lookup(costs: LoadedTable | None) -> dict[str, tuple[int, int]]:
+    if costs is None:
+        return {}
+    return {
+        str(row["编码"]): (int(row["成本_分"]), int(row["运费_分"]))
+        for _, row in costs.data.iterrows()
+    }
+
+
+def _build_freight_lookup(freight: LoadedTable | None) -> dict[str, int]:
+    if freight is None:
+        return {}
+    return {
+        str(row["运单号"]): int(row["总运费_分"])
+        for _, row in freight.data.iterrows()
+    }
+
+
+def _effective_waybill_counts(partitions: OrderPartitions) -> dict[str, int]:
+    frames = [partitions.normal, partitions.closed_shipped]
+    values = pd.concat(frames, ignore_index=True)["物流单号"].map(str)
+    values = values[values != ""]
+    return {str(key): int(value) for key, value in values.value_counts().items()}
+
+
+def _resolve_row(
+    row: pd.Series,
+    *,
+    cost_lookup: dict[str, tuple[int, int]],
+    freight_lookup: dict[str, int],
+    waybill_counts: dict[str, int],
+) -> tuple[dict[str, object], list[Issue]]:
+    issues: list[Issue] = []
+    code = str(row["商家编码"])
+    quantity = int(row["购买数量_标准"])
+    standard = cost_lookup.get(code)
+    price_difference = bool(row.get("是否补差价专用", False))
+
+    supplement_cost = row.get("补充货品成本_分")
+    existing_cost = row.get("货品成本_分")
+    if price_difference:
+        resolved_cost: int | None = 0
+        cost_source = "补差价专用业务规则"
+    elif not is_missing(supplement_cost):
+        resolved_cost = int(supplement_cost)
+        cost_source = "人工补充"
+    elif not is_missing(existing_cost):
+        resolved_cost = int(existing_cost)
+        cost_source = "订单表已有"
+    elif standard is not None:
+        resolved_cost = int(standard[0]) * quantity
+        cost_source = "成本编码表"
+    else:
+        resolved_cost = None
+        cost_source = "缺失"
+        issues.append(
+            Issue(
+                code="ORDER_COST_MISSING",
+                severity=Severity.WARNING,
+                message="订单明细货品成本无法解析",
+                location=_location(row, "商家编码"),
+                raw_value=code,
+                suggestion="在成本编码表或人工补充表中补齐成本",
+            )
+        )
+
+    supplement_freight = row.get("补充运费_分")
+    existing_freight = row.get("运费_分")
+    waybill = str(row.get("物流单号") or "")
+    actual_freight = freight_lookup.get(waybill) if waybill else None
+    freight_blocked = False
+    if not is_missing(supplement_freight):
+        resolved_freight: int | None = int(supplement_freight)
+        freight_source = "人工补充"
+    elif actual_freight is not None and waybill_counts.get(waybill, 0) > 1:
+        resolved_freight = None
+        freight_source = "共享运单未核算"
+        freight_blocked = True
+        issues.append(
+            Issue(
+                code="FREIGHT_SHARED_WAYBILL",
+                severity=Severity.WARNING,
+                message="实际运单被多条有效明细共享，运费保持未核算且禁止回退",
+                location=_location(row, "物流单号"),
+                raw_value=waybill,
+                suggestion="通过人工补充提供明细总运费，或确认业务分摊规则",
+            )
+        )
+    elif actual_freight is not None:
+        resolved_freight = actual_freight
+        freight_source = "运费表实际运费"
+    elif not is_missing(existing_freight):
+        resolved_freight = int(existing_freight)
+        freight_source = "订单表已有"
+    elif standard is not None:
+        resolved_freight = int(standard[1])
+        freight_source = "成本编码表标准运费"
+    elif price_difference:
+        resolved_freight = 0
+        freight_source = "补差价专用业务规则"
+    else:
+        resolved_freight = None
+        freight_source = "缺失"
+        issues.append(
+            Issue(
+                code="ORDER_FREIGHT_MISSING",
+                severity=Severity.WARNING,
+                message="订单明细运费无法解析",
+                location=_location(row, "物流单号"),
+                raw_value=waybill,
+                suggestion="检查运单号、成本编码表标准运费或人工补充表",
+            )
+        )
+
+    return (
+        {
+            "核算成本_分": resolved_cost,
+            "成本来源": cost_source,
+            "核算运费_分": resolved_freight,
+            "运费来源": freight_source,
+            "运费阻断回退": freight_blocked,
+            "成本运费状态": (
+                "已核算" if resolved_cost is not None and resolved_freight is not None else "成本或运费缺失"
+            ),
+        },
+        issues,
+    )
+
+
+def _resolve_frame(
+    frame: pd.DataFrame,
+    *,
+    cost_lookup: dict[str, tuple[int, int]],
+    freight_lookup: dict[str, int],
+    waybill_counts: dict[str, int],
+) -> tuple[pd.DataFrame, list[Issue]]:
+    result = frame.copy()
+    records: list[dict[str, object]] = []
+    issues: list[Issue] = []
+    for _, row in result.iterrows():
+        resolved, row_issues = _resolve_row(
+            row,
+            cost_lookup=cost_lookup,
+            freight_lookup=freight_lookup,
+            waybill_counts=waybill_counts,
+        )
+        records.append(resolved)
+        issues.extend(row_issues)
+    if records:
+        resolved_data = pd.DataFrame(records, index=result.index)
+        for column in resolved_data.columns:
+            result[column] = resolved_data[column]
+    else:
+        for column in (
+            "核算成本_分",
+            "成本来源",
+            "核算运费_分",
+            "运费来源",
+            "运费阻断回退",
+            "成本运费状态",
+        ):
+            result[column] = pd.Series(index=result.index, dtype=object)
+    return result, issues
+
+
+def resolve_costs_and_freight(
+    partitions: OrderPartitions,
+    *,
+    costs: LoadedTable | None,
+    freight: LoadedTable | None,
+    supplement_audit: pd.DataFrame,
+) -> CostResolutionResult:
+    """按规范优先级解析有效正常和关闭已发货订单的成本与运费。"""
+
+    cost_lookup = _build_cost_lookup(costs)
+    freight_lookup = _build_freight_lookup(freight)
+    waybill_counts = _effective_waybill_counts(partitions)
+    normal, normal_issues = _resolve_frame(
+        partitions.normal,
+        cost_lookup=cost_lookup,
+        freight_lookup=freight_lookup,
+        waybill_counts=waybill_counts,
+    )
+    closed, closed_issues = _resolve_frame(
+        partitions.closed_shipped,
+        cost_lookup=cost_lookup,
+        freight_lookup=freight_lookup,
+        waybill_counts=waybill_counts,
+    )
+
+    audit = supplement_audit.copy()
+    if not audit.empty:
+        partition_by_row = {
+            int(row["source_row_number"]): partition.value
+            for partition, frame in partitions.as_dict().items()
+            for _, row in frame.iterrows()
+        }
+        audit["匹配订单分区"] = audit["匹配订单源行"].map(partition_by_row)
+
+    return CostResolutionResult(
+        normal=normal,
+        closed_shipped=closed,
+        supplement_audit=audit,
+        issues=tuple(partitions.issues) + tuple(normal_issues) + tuple(closed_issues),
+    )

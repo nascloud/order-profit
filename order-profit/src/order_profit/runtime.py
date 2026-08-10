@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,38 @@ from order_profit.config import RunConfig, SPEC_VERSION
 from order_profit.models import InputFileMetadata, Issue, RunStatus
 
 LOGGER_NAME = "order_profit"
+
+
+def deduplicate_issues(issues: Iterable[Issue]) -> list[Issue]:
+    """按结构化内容稳定去重，供日志与所有 manifest 共用。"""
+
+    result: list[Issue] = []
+    seen: set[str] = set()
+    for issue in issues:
+        key = json.dumps(issue.to_dict(), ensure_ascii=False, sort_keys=True, default=str)
+        if key not in seen:
+            seen.add(key)
+            result.append(issue)
+    return result
+
+
+def serialize_summary(summary: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: (value if isinstance(value, (str, int, float, bool, type(None))) else str(value))
+        for key, value in summary.items()
+    }
+
+
+def serialize_reconciliation(checks: Iterable[Any]) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": check.name,
+            "expected": check.expected,
+            "actual": check.actual,
+            "passed": check.passed,
+        }
+        for check in checks
+    ]
 
 
 def configure_logging(*, verbose: bool = False) -> logging.Logger:
@@ -53,7 +86,7 @@ def build_manifest(
         "completed_at": (completed_at or datetime.now(UTC)).isoformat(),
         "config": config.to_dict(),
         "inputs": {name: metadata.to_dict() for name, metadata in inputs.items()},
-        "issues": [issue.to_dict() for issue in (issues or [])],
+        "issues": [issue.to_dict() for issue in deduplicate_issues(issues or [])],
     }
 
 

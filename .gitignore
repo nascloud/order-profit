@@ -22,6 +22,7 @@ order-profit/data/supplements/*
 !order-profit/data/supplements/.gitkeep
 order-profit/output/*
 !order-profit/output/.gitkeep
+/output/
 
 # Business source files and historical outputs at repository root
 /*.xlsx

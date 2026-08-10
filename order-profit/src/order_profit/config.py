@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import date
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from pathlib import Path
@@ -86,6 +86,16 @@ class RunConfig:
     @property
     def tax_rate(self) -> Decimal:
         return TAX_RATE
+
+    def period_bounds(self) -> tuple[datetime, datetime]:
+        """返回配置时区中的半开核算区间。"""
+
+        timezone = ZoneInfo(self.timezone)
+        start = datetime.combine(self.start_date, time.min, tzinfo=timezone)
+        end_exclusive = datetime.combine(
+            self.end_date + timedelta(days=1), time.min, tzinfo=timezone
+        )
+        return start, end_exclusive
 
     def input_paths(self) -> dict[str, Path]:
         """返回本次启用的输入文件。"""

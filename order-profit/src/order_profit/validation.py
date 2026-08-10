@@ -59,9 +59,15 @@ def _require_nonempty_key(data: pd.DataFrame, *, column: str, role: str) -> None
                     message=f"{column}是必需匹配键，不能为空",
                     location=SourceLocation(
                         file=data.attrs.get("source_path"),
+                        sheet=(
+                            str(data.loc[mask, "source_sheet"].iloc[0])
+                            if "source_sheet" in data and rows
+                            else None
+                        ),
                         row=rows[0] if rows else None,
                         field=column,
                     ),
+                    raw_value="（空）",
                     suggestion="请补齐匹配键或删除无效行后重试",
                 )
             ],

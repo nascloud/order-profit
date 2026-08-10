@@ -11,9 +11,16 @@ from pathlib import Path
 from order_profit import __version__
 from order_profit.config import Platform, RecalculationMode, RunConfig
 from order_profit.errors import OrderProfitError, PipelineNotImplementedError
-from order_profit.models import RunStatus
-from order_profit.pipeline import validate_inputs
-from order_profit.runtime import build_manifest, configure_logging, write_manifest
+from order_profit.pipeline import validate_and_partition_orders
+from order_profit.reporting import execute_run
+from order_profit.runtime import (
+    build_manifest,
+    configure_logging,
+    deduplicate_issues,
+    serialize_reconciliation,
+    serialize_summary,
+    write_manifest,
+)
 
 
 def _parse_date(value: str) -> date:
@@ -56,7 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subparsers = parser.add_subparsers(dest="command")
 
-    validate_parser = subparsers.add_parser("validate-inputs", help="执行 P1～P3 输入契约和安全标准化")
+    validate_parser = subparsers.add_parser("validate-inputs", help="执行 P1～P4 输入契约、标准化与订单分区")
     _add_common_arguments(validate_parser)
 
     run_parser = subparsers.add_parser("run", help="执行完整核算（P4 以后完成前拒绝运行）")
@@ -91,25 +98,76 @@ def _config_from_args(args: argparse.Namespace) -> RunConfig:
 def _validate_command(config: RunConfig, *, verbose: bool) -> int:
     logger = configure_logging(verbose=verbose)
     started_at = datetime.now().astimezone()
-    loaded = validate_inputs(config)
+    validation = validate_and_partition_orders(config)
+    loaded = validation.tables
+    partitions = validation.partitions
+    cost_result = validation.costs
+    analysis = validation.analysis
+    reconciliation = validation.reconciliation
     metadata = {role: table.metadata for role, table in loaded.items()}
     issues = [issue for table in loaded.values() for issue in table.issues]
+    issues.extend(analysis.issues)
+    issues = deduplicate_issues(issues)
     for role, table in loaded.items():
         logger.info("%s：%s 行，SHA-256 %s…", role, len(table.data), table.metadata.sha256[:12])
+    counts = partitions.counts()
+    logger.info(
+        "订单分区：删除 %s，超期 %s，正常 %s，关闭已发货 %s，无编码 %s，其他状态 %s",
+        counts["DELETED_BY_RULE"],
+        counts["OUT_OF_PERIOD"],
+        counts["NORMAL_CODED"],
+        counts["CLOSED_SHIPPED_CODED"],
+        counts["MISSING_MERCHANT_CODE"],
+        counts["OTHER_STATUS"],
+    )
+    logger.info(
+        "成本运费：成本缺失 %s 行，运费缺失 %s 行，补充审计 %s 行",
+        cost_result.missing_cost_rows,
+        cost_result.missing_freight_rows,
+        len(cost_result.supplement_audit),
+    )
+    logger.info(
+        "核算摘要：状态 %s，已核算销售额 %.2f 元，含推广净利润 %.2f 元，有效链接 %s",
+        reconciliation.status.value,
+        int(analysis.summary["已核算销售额_分"]) / 100,
+        int(analysis.summary["含推广净利润_分"]) / 100,
+        analysis.summary["有效商品链接"],
+    )
     for issue in issues:
         logger.warning("%s：%s", issue.code, issue.message)
     manifest = build_manifest(
         config=config,
-        status=RunStatus.PROVISIONAL,
+        status=reconciliation.status,
         inputs=metadata,
         issues=issues,
         started_at=started_at,
     )
-    manifest["stage"] = "P1-P3_INPUT_VALIDATION"
-    manifest["note"] = "输入契约与安全标准化通过；尚未执行 P4 之后的利润核算。"
+    manifest["stage"] = "P1-P9_IN_MEMORY_RECONCILIATION"
+    manifest["order_partitions"] = counts
+    manifest["cost_freight"] = {
+        "missing_cost_rows": cost_result.missing_cost_rows,
+        "missing_freight_rows": cost_result.missing_freight_rows,
+        "supplement_audit_rows": len(cost_result.supplement_audit),
+    }
+    manifest["summary"] = serialize_summary(analysis.summary)
+    manifest["reconciliation"] = serialize_reconciliation(reconciliation.checks)
+    manifest["note"] = "内存核算与强制勾稽通过；尚未生成 P10～P13 Excel、HTML 和桌面交付物。"
     path = config.output_dir / "validation-manifest.json"
     write_manifest(manifest, path)
-    logger.info("P1～P3 校验通过；清单已写入 %s", path.resolve())
+    logger.info("P1～P9 内存核算与勾稽通过；清单已写入 %s", path.resolve())
+    if reconciliation.status.value == "PROVISIONAL" and config.require_complete:
+        logger.error("启用了 --require-complete，但仍有成本或运费缺失")
+        return 4
+    return 0
+
+
+def _run_command(config: RunConfig, *, verbose: bool) -> int:
+    logger = configure_logging(verbose=verbose)
+    outcome = execute_run(config)
+    logger.info("报告状态：%s", outcome.result.reconciliation.status.value)
+    logger.info("Excel：%s", outcome.reports.excel)
+    logger.info("运营复盘 HTML：%s", outcome.reports.html)
+    logger.info("运行清单：%s", outcome.reports.manifest)
     return 0
 
 
@@ -123,9 +181,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         config = _config_from_args(args)
         if args.command == "validate-inputs":
             return _validate_command(config, verbose=args.verbose)
+        if args.command == "run":
+            return _run_command(config, verbose=args.verbose)
         raise PipelineNotImplementedError(
-            "完整利润流水线将在 P4～P13 完成后开放；当前请使用 validate-inputs",
-            code="PIPELINE_NOT_READY",
+            "未知命令",
+            code="PIPELINE_COMMAND_UNKNOWN",
         )
     except OrderProfitError as exc:
         print(f"错误 [{exc.code}]：{exc.message}", file=sys.stderr)

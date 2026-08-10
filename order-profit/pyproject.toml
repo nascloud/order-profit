@@ -25,6 +25,7 @@ windows-excel = ["pywin32>=308; platform_system == 'Windows'"]
 
 [project.scripts]
 order-profit = "order_profit.__main__:main"
+order-profit-gui = "order_profit.desktop:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/order_profit"]
