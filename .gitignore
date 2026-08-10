@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.coverage
+htmlcov/
+build/
+dist/
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Runtime data and generated reports
+order-profit/data/raw/*
+!order-profit/data/raw/.gitkeep
+order-profit/data/supplements/*
+!order-profit/data/supplements/.gitkeep
+order-profit/output/*
+!order-profit/output/.gitkeep
+
+# Business source files and historical outputs at repository root
+/*.xlsx
+/*.xls
+/*.csv
+/*.html
+/8.1-8.7订单成本利润分析/
+
+# Logs and temporary files
+*.log
+*.tmp
+~$*
