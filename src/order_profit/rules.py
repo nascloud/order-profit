@@ -15,7 +15,7 @@ from order_profit.models import Issue, Severity, SourceLocation
 from order_profit.normalize import is_missing, normalize_quantity
 
 NORMAL_STATUSES: Final[frozenset[str]] = frozenset(
-    {"交易成功", "卖家已发货，等待买家确认"}
+    {"买家已付款，等待卖家发货", "卖家已发货，等待买家确认", "交易成功"}
 )
 CLOSED_STATUS: Final[str] = "交易关闭"
 PRICE_DIFFERENCE_TITLE: Final[str] = "补差价专用"
