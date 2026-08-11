@@ -6,10 +6,12 @@ from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+import pytest
 from openpyxl import load_workbook
 
 from order_profit.config import Platform, RunConfig
 from order_profit.costs import apply_supplements
+from order_profit.errors import InputContractError
 from order_profit.inputs import InputFileMetadata, LoadedTable, load_supplements
 from order_profit.models import RunStatus
 from order_profit.normalize import add_source_audit_columns
@@ -43,6 +45,7 @@ def _incomplete_result() -> SimpleNamespace:
                 "物流单号": "W1",
                 "订单状态": "交易成功",
                 "订单付款时间_标准": datetime(2026, 8, 1, tzinfo=TZ),
+                "买家应付货款_分": 2050,
                 "核算成本_分": None,
                 "核算运费_分": 800,
                 "成本来源": "缺失",
@@ -68,12 +71,16 @@ def test_pending_workbook_is_directly_loadable_as_draft(tmp_path: Path) -> None:
     workbook = load_workbook(path, data_only=True)
     worksheet = workbook["人工补充表"]
     assert [cell.value for cell in worksheet[1]] == COLUMNS
-    assert worksheet["E2"].value == 17
-    assert worksheet["F2"].value is None
-    assert worksheet["G2"].value is None
-    assert worksheet["H2"].value == "草稿"
-    assert worksheet["K2"].value == "颜色分类:白色；规格:加厚款"
-    for coordinate in ("D2", "F2", "G2", "H2"):
+    assert COLUMNS[:5] == ["主订单编号", "商品ID", "商品标题", "商品属性", "用户付款金额"]
+    assert worksheet["C2"].value == "测试商品"
+    assert worksheet["D2"].value == "颜色分类:白色；规格:加厚款"
+    assert worksheet["E2"].value == 20.5
+    assert worksheet["G2"].value == 17
+    assert worksheet["H2"].value is None
+    assert worksheet["I2"].value is None
+    assert worksheet["J2"].value == "草稿"
+    assert "补充商家编码" not in COLUMNS
+    for coordinate in ("H2", "I2", "J2"):
         assert worksheet[coordinate].fill.fgColor.rgb.endswith("FFF2CC")
     workbook.close()
 
@@ -90,13 +97,13 @@ def test_pending_workbook_keeps_confirmed_rows_for_next_rerun(tmp_path: Path) ->
                 "主订单编号": "OLD",
                 "商品ID": "P0",
                 "商家编码": "",
-                "补充商家编码": "",
                 "明细序号": 16,
                 "货品成本_分": 1234,
                 "运费_分": 800,
                 "补充状态": "已确认",
                 "商品标题": "已完成商品",
                 "商品属性": "颜色:白色",
+                "买家应付货款_分": 1888,
                 "购买数量": 1,
                 "物流单号": "W0",
                 "订单状态": "交易成功",
@@ -127,30 +134,33 @@ def test_pending_workbook_keeps_confirmed_rows_for_next_rerun(tmp_path: Path) ->
     worksheet = workbook["人工补充表"]
     assert worksheet.max_row == 3
     assert worksheet["A2"].value == "OLD"
-    assert worksheet["F2"].value == 12.34
-    assert worksheet["G2"].value == 8
-    assert worksheet["H2"].value == "已确认"
-    assert worksheet["I2"].value == "已应用，留存供后续重算"
+    assert worksheet["C2"].value == "已完成商品"
+    assert worksheet["D2"].value == "颜色:白色"
+    assert worksheet["E2"].value == 18.88
+    assert worksheet["H2"].value == 12.34
+    assert worksheet["I2"].value == 8
+    assert worksheet["J2"].value == "已确认"
+    assert worksheet["K2"].value == "已应用，留存供后续重算"
     assert worksheet["A3"].value == "O1"
-    assert worksheet["H3"].value == "草稿"
+    assert worksheet["J3"].value == "草稿"
     workbook.close()
 
 
-def test_missing_merchant_code_can_be_confirmed_by_detail_number(tmp_path: Path) -> None:
+def test_missing_merchant_code_requires_cost_and_freight(tmp_path: Path) -> None:
     result = _incomplete_result()
     missing_code = result.analysis.profit.normal.copy()
     missing_code["商家编码"] = ""
     missing_code["核算状态"] = None
     result.partitions = SimpleNamespace(missing_merchant_code=missing_code)
-    # This synthetic result includes only the missing-code partition.
     result.analysis.profit.normal = result.analysis.profit.normal.iloc[0:0].copy()
     path = tmp_path / "待补成本运费.xlsx"
     write_pending_supplements(result, path)
     workbook = load_workbook(path)
     worksheet = workbook["人工补充表"]
-    assert worksheet["I2"].value == "商家编码或成本+运费"
-    worksheet["D2"] = "NEW-SKU"
-    worksheet["H2"] = "已确认"
+    assert worksheet["K2"].value == "成本+运费"
+    worksheet["H2"] = 12.34
+    worksheet["I2"] = 8
+    worksheet["J2"] = "已确认"
     workbook.save(path)
     workbook.close()
 
@@ -191,13 +201,12 @@ def test_missing_merchant_code_can_be_confirmed_by_detail_number(tmp_path: Path)
 
     applied = apply_supplements(orders, supplement, overwrite_existing=False)
 
-    assert applied.orders.data.iloc[0]["商家编码"] == "NEW-SKU"
-    assert bool(applied.audit.iloc[0]["编码已应用"])
+    assert applied.orders.data.iloc[0]["商家编码"] == ""
+    assert applied.orders.data.iloc[0]["补充货品成本_分"] == 1234
+    assert applied.orders.data.iloc[0]["补充运费_分"] == 800
 
 
-def test_missing_merchant_code_can_be_confirmed_without_supplemental_code(
-    tmp_path: Path,
-) -> None:
+def test_missing_merchant_code_rejects_only_one_amount(tmp_path: Path) -> None:
     result = _incomplete_result()
     missing_code = result.analysis.profit.normal.copy()
     missing_code["商家编码"] = ""
@@ -208,9 +217,39 @@ def test_missing_merchant_code_can_be_confirmed_without_supplemental_code(
     write_pending_supplements(result, path)
     workbook = load_workbook(path)
     worksheet = workbook["人工补充表"]
-    worksheet["F2"] = 12.34
-    worksheet["G2"] = 8
-    worksheet["H2"] = "已确认"
+    worksheet["H2"] = 12.34
+    worksheet["J2"] = "已确认"
+    workbook.save(path)
+    workbook.close()
+
+    loaded = load_supplements(path, "人工补充表")
+    audited = add_source_audit_columns(
+        loaded.data,
+        path=loaded.metadata.path,
+        sheet=loaded.metadata.sheet,
+        file_sha256=loaded.metadata.sha256,
+    )
+    with pytest.raises(InputContractError, match="同时填写成本和运费"):
+        normalize_supplements(
+            LoadedTable(audited, loaded.metadata, loaded.issues),
+            _config(tmp_path),
+        )
+
+
+def test_missing_merchant_code_accepts_both_amounts(tmp_path: Path) -> None:
+    result = _incomplete_result()
+    missing_code = result.analysis.profit.normal.copy()
+    missing_code["商家编码"] = ""
+    missing_code["核算状态"] = None
+    result.partitions = SimpleNamespace(missing_merchant_code=missing_code)
+    result.analysis.profit.normal = result.analysis.profit.normal.iloc[0:0].copy()
+    path = tmp_path / "待补成本运费.xlsx"
+    write_pending_supplements(result, path)
+    workbook = load_workbook(path)
+    worksheet = workbook["人工补充表"]
+    worksheet["H2"] = 12.34
+    worksheet["I2"] = 8
+    worksheet["J2"] = "已确认"
     workbook.save(path)
     workbook.close()
 
@@ -236,8 +275,8 @@ def test_confirmed_generated_row_applies_by_detail_number(tmp_path: Path) -> Non
     write_pending_supplements(_incomplete_result(), path)
     workbook = load_workbook(path)
     worksheet = workbook["人工补充表"]
-    worksheet["F2"] = 12.34
-    worksheet["H2"] = "已确认"
+    worksheet["H2"] = 12.34
+    worksheet["J2"] = "已确认"
     workbook.save(path)
     workbook.close()
 

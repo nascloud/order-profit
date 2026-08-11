@@ -287,8 +287,20 @@ def normalize_supplements(table: LoadedTable, config: RunConfig) -> LoadedTable:
     if invalid_empty.any():
         rows = data.loc[invalid_empty, "source_row_number"].astype(int).tolist()[:10]
         raise InputContractError(
-            f"生效的人工补充行必须填写补充商家编码、成本或运费之一，源行：{rows}",
+            f"生效的人工补充行必须填写成本或运费，源行：{rows}",
             code="SUPPLEMENT_VALUES_EMPTY",
+        )
+    incomplete_without_code = (
+        data["商家编码"].eq("")
+        & data["补充商家编码"].eq("")
+        & (data["货品成本_分"].isna() | data["运费_分"].isna())
+        & active
+    )
+    if incomplete_without_code.any():
+        rows = data.loc[incomplete_without_code, "source_row_number"].astype(int).tolist()[:10]
+        raise InputContractError(
+            f"原商家编码为空的生效补充行必须同时填写成本和运费，源行：{rows}",
+            code="SUPPLEMENT_CODELESS_AMOUNTS_INCOMPLETE",
         )
     missing_original_code_without_detail = (
         data["商家编码"].eq("")

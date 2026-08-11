@@ -9,6 +9,7 @@ import pandas as pd
 from openpyxl import Workbook, load_workbook
 from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
 from order_profit.errors import OutputError
@@ -27,15 +28,15 @@ BODY_FONT = Font(name="Arial", color="000000")
 COLUMNS = [
     "主订单编号",
     "商品ID",
+    "商品标题",
+    "商品属性",
+    "用户付款金额",
     "商家编码",
-    "补充商家编码",
     "明细序号",
     "货品成本",
     "运费",
     "补充状态",
     "缺失项目",
-    "商品标题",
-    "商品属性",
     "购买数量",
     "物流单号",
     "订单状态",
@@ -44,6 +45,7 @@ COLUMNS = [
     "成本来源",
     "运费来源",
 ]
+COLUMN_INDEX = {name: index + 1 for index, name in enumerate(COLUMNS)}
 
 
 def _missing_rows(result: ValidationResult) -> pd.DataFrame:
@@ -65,7 +67,7 @@ def _missing_rows(result: ValidationResult) -> pd.DataFrame:
     missing_code = result.partitions.missing_merchant_code.copy()
     if not missing_code.empty:
         missing_code["待补订单类型"] = "无商家编码"
-        missing_code["待补缺失项目"] = "商家编码或成本+运费"
+        missing_code["待补缺失项目"] = "成本+运费"
         for column in ("核算成本_分", "核算运费_分", "成本来源", "运费来源"):
             if column not in missing_code.columns:
                 missing_code[column] = None
@@ -90,6 +92,8 @@ def _confirmed_rows(
         return []
     rows: list[list[object]] = []
     for _, row in active.iterrows():
+        if is_missing(row.get("货品成本_分")) and is_missing(row.get("运费_分")):
+            continue
         detail_number = (
             None if is_missing(row.get("明细序号")) else int(row["明细序号"])
         )
@@ -99,15 +103,19 @@ def _confirmed_rows(
             [
                 str(row.get("主订单编号", "")),
                 str(row.get("商品ID", "")),
+                str(row.get("商品标题", "")),
+                str(row.get("商品属性", "")),
+                (
+                    None
+                    if is_missing(row.get("买家应付货款_分"))
+                    else int(row["买家应付货款_分"]) / 100
+                ),
                 str(row.get("商家编码", "")),
-                str(row.get("补充商家编码", "")) or None,
                 detail_number,
                 None if is_missing(row.get("货品成本_分")) else int(row["货品成本_分"]) / 100,
                 None if is_missing(row.get("运费_分")) else int(row["运费_分"]) / 100,
                 "已确认",
                 "已应用，留存供后续重算",
-                str(row.get("商品标题", "")),
-                str(row.get("商品属性", "")),
                 None if is_missing(row.get("购买数量")) else int(row["购买数量"]),
                 str(row.get("物流单号", "")),
                 str(row.get("订单状态", "")),
@@ -149,7 +157,10 @@ def write_pending_supplements(
         cell.font = HEADER_FONT
         cell.alignment = Alignment(horizontal="center", vertical="center")
     worksheet.freeze_panes = "A2"
-    worksheet.auto_filter.ref = f"A1:R{len(confirmed) + len(missing) + 1}"
+    last_column = get_column_letter(len(COLUMNS))
+    worksheet.auto_filter.ref = (
+        f"A1:{last_column}{len(confirmed) + len(missing) + 1}"
+    )
 
     for values in confirmed:
         worksheet.append(values)
@@ -162,15 +173,19 @@ def write_pending_supplements(
         values = [
             str(row.get("主订单编号", "")),
             str(row.get("商品ID", "")),
+            str(row.get("商品标题", "")),
+            str(row.get("商品属性", "")),
+            (
+                None
+                if is_missing(row.get("买家应付货款_分"))
+                else int(row["买家应付货款_分"]) / 100
+            ),
             str(row.get("商家编码", "")),
-            None,
             int(row["source_row_number"]),
             None,
             None,
             "草稿",
             missing_items,
-            str(row.get("商品标题", "")),
-            str(row.get("商品属性", "")),
             int(row.get("购买数量_标准", 0)),
             str(row.get("物流单号", "")),
             str(row.get("订单状态", "")),
@@ -180,16 +195,35 @@ def write_pending_supplements(
             str(row.get("运费来源", "")),
         ]
         worksheet.append(values)
+    input_columns = [
+        COLUMN_INDEX["货品成本"],
+        COLUMN_INDEX["运费"],
+        COLUMN_INDEX["补充状态"],
+    ]
+    text_columns = [
+        COLUMN_INDEX["主订单编号"],
+        COLUMN_INDEX["商品ID"],
+        COLUMN_INDEX["商家编码"],
+        COLUMN_INDEX["明细序号"],
+        COLUMN_INDEX["物流单号"],
+    ]
+    money_columns = [
+        COLUMN_INDEX["用户付款金额"],
+        COLUMN_INDEX["货品成本"],
+        COLUMN_INDEX["运费"],
+        COLUMN_INDEX["当前核算成本"],
+        COLUMN_INDEX["当前核算运费"],
+    ]
     for output_row in range(2, worksheet.max_row + 1):
         for column in range(1, len(COLUMNS) + 1):
             worksheet.cell(output_row, column).font = BODY_FONT
-        for column in (4, 6, 7, 8):
+        for column in input_columns:
             cell = worksheet.cell(output_row, column)
             cell.fill = INPUT_FILL
             cell.font = INPUT_FONT
-        for column in (1, 2, 3, 4, 5, 13):
+        for column in text_columns:
             worksheet.cell(output_row, column).number_format = "@"
-        for column in (6, 7, 15, 16):
+        for column in money_columns:
             worksheet.cell(output_row, column).number_format = '#,##0.00;[Red]-#,##0.00'
 
     status_validation = DataValidation(
@@ -200,23 +234,31 @@ def write_pending_supplements(
     status_validation.error = "请选择草稿、已确认或作废"
     status_validation.errorTitle = "补充状态无效"
     worksheet.add_data_validation(status_validation)
-    status_validation.add(f"H2:H{len(confirmed) + len(missing) + 1}")
-    worksheet["D1"].comment = Comment("仅原商家编码为空时填写；已有编码不允许覆盖。", "order-profit")
-    worksheet["F1"].comment = Comment("黄色单元格：填写该订单明细的总货品成本，单位元。", "order-profit")
-    worksheet["G1"].comment = Comment("黄色单元格：填写该订单明细的总运费，单位元。", "order-profit")
-    worksheet["H1"].comment = Comment("填写完成后将草稿改为已确认；草稿行不会参与核算。", "order-profit")
+    status_column = get_column_letter(COLUMN_INDEX["补充状态"])
+    status_validation.add(
+        f"{status_column}2:{status_column}{len(confirmed) + len(missing) + 1}"
+    )
+    comments = {
+        "货品成本": "黄色单元格：填写该订单明细的总货品成本，单位元。",
+        "运费": "黄色单元格：填写该订单明细的总运费，单位元。",
+        "补充状态": "填写完成后将草稿改为已确认；草稿行不会参与核算。",
+        "用户付款金额": "订单表中的买家应付货款，仅供核对，不可编辑。",
+    }
+    for column_name, text in comments.items():
+        column_letter = get_column_letter(COLUMN_INDEX[column_name])
+        worksheet[f"{column_letter}1"].comment = Comment(text, "order-profit")
     widths = {
         "A": 24,
         "B": 18,
-        "C": 28,
-        "D": 28,
-        "E": 12,
-        "F": 14,
-        "G": 14,
-        "H": 12,
+        "C": 46,
+        "D": 46,
+        "E": 16,
+        "F": 28,
+        "G": 12,
+        "H": 14,
         "I": 14,
-        "J": 46,
-        "K": 46,
+        "J": 12,
+        "K": 14,
         "L": 12,
         "M": 20,
         "N": 24,
@@ -233,12 +275,12 @@ def write_pending_supplements(
     guide_rows = [
         ["步骤", "操作"],
         ["1", "在人工补充表中筛选缺失项目。"],
-        ["2", "无编码行二选一：填写黄色“补充商家编码”，或同时填写黄色成本和运费；已有编码行按缺失项目填写。"],
-        ["3", "金额为当前订单明细总金额；无编码行可不补编码，但必须同时补齐成本和运费才能完成核算；只补编码时可不填金额。"],
+        ["2", "按缺失项目填写黄色成本和/或运费；原商家编码为空的明细必须同时填写成本和运费。"],
+        ["3", "金额为当前订单明细总金额；货品成本和运费均以元为单位，不再乘购买数量。"],
         ["4", "填写完成后把补充状态从草稿改为已确认。"],
         ["5", "保存文件；不要修改主订单编号、商品ID、原商家编码和明细序号。"],
         ["6", "回到桌面端，在“人工补充表”中选择本文件，重新生成经营复盘。"],
-        ["说明", "草稿和作废行不参与核算；已确认行至少填写补充编码、成本或运费之一。"],
+        ["说明", "草稿和作废行不参与核算；已确认行必须至少填写成本或运费之一，无商家编码行必须两项均填写。"],
         ["说明", "明细序号是原订单 Excel 行号，用于精确定位重复基础键。"],
     ]
     for row in guide_rows:
