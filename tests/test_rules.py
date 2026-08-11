@@ -164,6 +164,9 @@ def test_period_is_half_open_and_partitions_are_mutually_exclusive(tmp_path: Pat
         "OUT_OF_PERIOD": 1,
         "NORMAL_CODED": 2,
         "CLOSED_SHIPPED_CODED": 1,
+        "CLOSED_UNSHIPPED_PAID": 0,
+        "CLOSED_UNPAID": 0,
+        "PAYMENT_ANOMALY": 0,
         "MISSING_MERCHANT_CODE": 1,
         "OTHER_STATUS": 1,
     }
@@ -257,7 +260,7 @@ def test_normal_order_requires_payment_and_successful_refund_amount(tmp_path: Pa
         partition_orders(missing_refund, _config(tmp_path))
 
 
-def test_closed_shipped_allows_missing_payment(tmp_path: Path) -> None:
+def test_closed_payment_time_and_amount_conflict_is_audited(tmp_path: Path) -> None:
     table = _table(
         tmp_path,
         [
@@ -273,4 +276,19 @@ def test_closed_shipped_allows_missing_payment(tmp_path: Path) -> None:
 
     result = partition_orders(table, _config(tmp_path))
 
-    assert len(result.closed_shipped) == 1
+    assert result.closed_shipped.empty
+    assert len(result.payment_anomaly) == 1
+    assert {issue.code for issue in result.issues} == {"ORDER_PAYMENT_STATE_CONFLICT"}
+
+
+def test_paid_closed_without_logistics_and_unpaid_closed_are_partitioned_before_dates(tmp_path: Path) -> None:
+    table = _table(tmp_path, [
+        _row(2, 订单状态="交易关闭", 物流单号="", 买家应付货款_分=2000),
+        _row(3, 订单状态="交易关闭", 物流单号="", 订单付款时间=None, 订单付款时间_标准=None, 买家应付货款=None, 买家应付货款_分=None),
+    ])
+
+    result = partition_orders(table, _config(tmp_path))
+
+    assert len(result.closed_unshipped) == 1
+    assert len(result.unpaid_closed) == 1
+    assert result.closed_shipped.empty

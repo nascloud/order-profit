@@ -25,22 +25,29 @@ def test_html_escapes_business_text_and_embeds_safe_json(tmp_path: Path) -> None
             {
                 "商品ID": "P1",
                 "商品链接": "https://item.taobao.com/item.htm?id=P1",
-                "商品标题": "<script>alert(1)</script>",
+                "商品标题": "<img src=x onerror=document.body.dataset.pwned=1>",
                 "数据覆盖": "订单+推广",
-                "核算状态": "完整",
+                "核算状态": "已核算",
                 "盈利状态": "盈利",
-                "正常订单行数": 1,
-                "全部销售额_分": 10000,
-                "全部有效退款_分": 0,
-                "正常订单货品成本_分": 3000,
-                "正常订单运费_分": 500,
+                "产品名称": "产品一",
+                "SABC等级": "S",
+                "主订单数": 1,
+                "购买数量": 1,
+                "销售额_分": 10000,
+                "销售贡献率": Decimal("1"),
+                "订单批次成功退款_分": 0,
+                "退款率": Decimal("0"),
+                "货品成本_分": 3000,
+                "运费_分": 500,
                 "平台扣点_分": 600,
                 "综合税赋_分": 230,
                 "关闭已发货损失_分": 0,
                 "推广花费_分": 1000,
                 "推广归因成交金额_分": 5000,
-                "推广ROI": Decimal("5"),
-                "含推广利润_分": 4670,
+                "推广投产比": Decimal("5"),
+                "含推广经营贡献利润_分": 4670,
+                "经营贡献利润率": Decimal("0.467"),
+                "盈利贡献率": Decimal("1"),
                 "成本运费缺失行数": 0,
                 "运营动作优先级": "中",
                 "运营动作": "加投观察",
@@ -48,16 +55,22 @@ def test_html_escapes_business_text_and_embeds_safe_json(tmp_path: Path) -> None
         ]
     )
     summary = {
+        "已付款销售额_分": 10000,
+        "订单批次成功退款金额_分": 0,
+        "期间退款完结金额_分": 0,
+        "净销售额_分": 10000,
         "已核算销售额_分": 10000,
-        "已核算有效退款_分": 0,
+        "已核算订单批次成功退款_分": 0,
         "已核算货品成本_分": 3000,
         "已核算运费_分": 500,
         "已核算平台扣点_分": 600,
         "已核算综合税赋_分": 230,
         "关闭已发货损失_分": 0,
         "推广花费_分": 1000,
-        "含推广净利润_分": 4670,
-        "含推广净利率": Decimal("0.467"),
+        "含推广经营贡献利润_分": 4670,
+        "经营贡献利润率": Decimal("0.467"),
+        "销售额核算覆盖率": Decimal("1"),
+        "推广投产比": Decimal("5"),
         "推广归因成交金额_分": 5000,
         "有效商品链接": 1,
         "订单+推广链接": 1,
@@ -65,7 +78,7 @@ def test_html_escapes_business_text_and_embeds_safe_json(tmp_path: Path) -> None
         "仅推广链接": 0,
     }
     result = SimpleNamespace(
-        analysis=SimpleNamespace(summary=summary, links=links),
+        analysis=SimpleNamespace(summary=summary, links=links, daily=pd.DataFrame(), products=pd.DataFrame()),
         reconciliation=SimpleNamespace(status=RunStatus.FINAL),
     )
     path = tmp_path / "report.html"
@@ -73,9 +86,19 @@ def test_html_escapes_business_text_and_embeds_safe_json(tmp_path: Path) -> None
     write_html(result, config, path)
     page = path.read_text(encoding="utf-8")
 
-    assert "<script>alert(1)</script>" not in page
-    assert "\\u003cscript\\u003ealert(1)\\u003c/script\\u003e" in page
+    assert "<img src=x" not in page
+    assert "\\u003cimg src=x" in page
+    assert "esc(r[c[1]]??'--')" in page
     assert "const DATA=" in page
     assert "搜索商品ID或标题" in page
     assert ".table-wrap{overflow:auto" in page
-    assert "accountingCls" in page
+    assert "含推广净利润" not in page
+    assert "全部订单销售链" in page
+    assert "已核算利润链" in page
+    assert "全部订单批次成功退款" in page
+    assert "销售额核算覆盖率 ${pct(S['销售额核算覆盖率'])}" in page
+    assert 'id="profitEquation"' in page
+    assert "profit-equation" in page
+    assert "term('关闭已发货损失'" in page
+    assert "term('净销售额',S['净销售额_分'],'result'" in page
+    assert "占已核算销售额 ${share(accountedRefund,accounted)}" in page

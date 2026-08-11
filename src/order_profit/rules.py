@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Final
 
@@ -38,13 +38,16 @@ class OrderPartition(StrEnum):
     OUT_OF_PERIOD = "OUT_OF_PERIOD"
     NORMAL_CODED = "NORMAL_CODED"
     CLOSED_SHIPPED_CODED = "CLOSED_SHIPPED_CODED"
+    CLOSED_UNSHIPPED_PAID = "CLOSED_UNSHIPPED_PAID"
+    CLOSED_UNPAID = "CLOSED_UNPAID"
+    PAYMENT_ANOMALY = "PAYMENT_ANOMALY"
     MISSING_MERCHANT_CODE = "MISSING_MERCHANT_CODE"
     OTHER_STATUS = "OTHER_STATUS"
 
 
 @dataclass(frozen=True, slots=True)
 class OrderPartitions:
-    """成功 P4 运行产生的六个互斥订单分区。"""
+    """成功 P4 运行产生的互斥订单分区。"""
 
     deleted: pd.DataFrame
     out_of_period: pd.DataFrame
@@ -52,6 +55,9 @@ class OrderPartitions:
     closed_shipped: pd.DataFrame
     missing_merchant_code: pd.DataFrame
     other_status: pd.DataFrame
+    closed_unshipped: pd.DataFrame = field(default_factory=pd.DataFrame)
+    unpaid_closed: pd.DataFrame = field(default_factory=pd.DataFrame)
+    payment_anomaly: pd.DataFrame = field(default_factory=pd.DataFrame)
     issues: tuple[Issue, ...] = ()
 
     def as_dict(self) -> dict[OrderPartition, pd.DataFrame]:
@@ -60,6 +66,9 @@ class OrderPartitions:
             OrderPartition.OUT_OF_PERIOD: self.out_of_period,
             OrderPartition.NORMAL_CODED: self.normal,
             OrderPartition.CLOSED_SHIPPED_CODED: self.closed_shipped,
+            OrderPartition.CLOSED_UNSHIPPED_PAID: self.closed_unshipped,
+            OrderPartition.CLOSED_UNPAID: self.unpaid_closed,
+            OrderPartition.PAYMENT_ANOMALY: self.payment_anomaly,
             OrderPartition.MISSING_MERCHANT_CODE: self.missing_merchant_code,
             OrderPartition.OTHER_STATUS: self.other_status,
         }
@@ -108,7 +117,9 @@ def apply_cleaning_rules(table: LoadedTable) -> tuple[pd.DataFrame, pd.DataFrame
     data = table.data.copy()
     data.attrs.update(table.data.attrs)
     data["cleaning_reasons"] = data.apply(_cleaning_reasons, axis=1)
-    deleted_mask = data["cleaning_reasons"].map(bool)
+    deleted_mask = data["cleaning_reasons"].map(
+        lambda reasons: any(reason != CleaningReason.CLOSED_WITHOUT_LOGISTICS.value for reason in reasons)
+    )
     deleted = data.loc[deleted_mask].copy()
     retained = data.loc[~deleted_mask].copy()
     deleted["partition"] = OrderPartition.DELETED_BY_RULE.value
@@ -287,16 +298,59 @@ def partition_orders(table: LoadedTable, config: RunConfig) -> OrderPartitions:
     """执行 P4 清洗、期间过滤、分类和源行守恒校验。"""
 
     retained, deleted = apply_cleaning_rules(table)
-    in_period, out_of_period = filter_period(retained, config)
-    classified, classification_issues = classify_orders(in_period)
+    status = retained["订单状态"].map(_text)
+    closed = status.eq(CLOSED_STATUS)
+    has_time = retained["订单付款时间_标准"].notna()
+    amount = retained["买家应付货款_分"]
+    has_amount = amount.notna() & amount.map(lambda value: int(value) > 0 if not is_missing(value) else False)
+    paid_closed_mask = closed & has_time & has_amount
+    unpaid_closed_mask = closed & ~has_time & ~has_amount
+    anomaly_mask = closed & ~(paid_closed_mask | unpaid_closed_mask)
+
+    unpaid_closed = retained.loc[unpaid_closed_mask].copy()
+    unpaid_closed["partition"] = OrderPartition.CLOSED_UNPAID.value
+    payment_anomaly = retained.loc[anomaly_mask].copy()
+    payment_anomaly["partition"] = OrderPartition.PAYMENT_ANOMALY.value
+    filterable = retained.loc[~(unpaid_closed_mask | anomaly_mask)].copy()
+    in_period, out_of_period = filter_period(filterable, config)
+
+    paid_closed = in_period[in_period["订单状态"].map(_text).eq(CLOSED_STATUS)].copy()
+    non_closed = in_period[~in_period["订单状态"].map(_text).eq(CLOSED_STATUS)].copy()
+    classified, classification_issues = classify_orders(non_closed)
+    logistics = paid_closed["物流单号"].map(_text)
+    closed_unshipped = paid_closed.loc[logistics.eq("")].copy()
+    closed_shipped = paid_closed.loc[logistics.ne("")].copy()
+    for frame, partition in (
+        (closed_unshipped, OrderPartition.CLOSED_UNSHIPPED_PAID),
+        (closed_shipped, OrderPartition.CLOSED_SHIPPED_CODED),
+    ):
+        frame["partition"] = partition.value
+        if not frame.empty:
+            frame["购买数量_标准"] = [
+                _validate_accountable_order(row, normal=True) for _, row in frame.iterrows()
+            ]
+            frame["是否补差价专用"] = frame.apply(is_price_difference, axis=1)
+    issues = list(classification_issues)
+    for _, row in payment_anomaly.iterrows():
+        issues.append(Issue(
+            code="ORDER_PAYMENT_STATE_CONFLICT",
+            severity=Severity.ERROR,
+            message="关闭订单付款时间与应付金额互相矛盾",
+            location=_location(row, "订单付款时间"),
+            raw_value={"付款时间": row.get("订单付款时间"), "应付金额_分": row.get("买家应付货款_分")},
+            suggestion="请核对关闭订单是否实际付款",
+        ))
     result = OrderPartitions(
         deleted=deleted,
         out_of_period=out_of_period,
         normal=classified[OrderPartition.NORMAL_CODED],
-        closed_shipped=classified[OrderPartition.CLOSED_SHIPPED_CODED],
+        closed_shipped=closed_shipped,
         missing_merchant_code=classified[OrderPartition.MISSING_MERCHANT_CODE],
         other_status=classified[OrderPartition.OTHER_STATUS],
-        issues=tuple(table.issues) + classification_issues,
+        closed_unshipped=closed_unshipped,
+        unpaid_closed=unpaid_closed,
+        payment_anomaly=payment_anomaly,
+        issues=tuple(table.issues) + tuple(issues),
     )
     _assert_partition_conservation(table.data, result)
     return result

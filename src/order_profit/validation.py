@@ -164,10 +164,13 @@ def normalize_costs(table: LoadedTable, config: RunConfig) -> LoadedTable:
     _require_nonempty_key(data, column="编码", role="成本编码表")
     _map_column(data, "成本", "成本_分", money_to_cents, nonnegative=True)
     _map_column(data, "运费", "运费_分", money_to_cents, nonnegative=True)
+    if "产品名称" not in data.columns:
+        data["产品名称"] = ""
+    data["产品名称"] = data["产品名称"].fillna("").map(lambda value: str(value).strip())
     data = _raise_duplicate_conflict(
         data,
         key="编码",
-        value_columns=["成本_分", "运费_分"],
+        value_columns=["成本_分", "运费_分", "产品名称"],
         role="成本编码表",
         code="COST_CODE_CONFLICT",
     )

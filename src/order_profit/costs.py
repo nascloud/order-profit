@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Final
 
 import pandas as pd
@@ -28,6 +28,7 @@ class CostResolutionResult:
     normal: pd.DataFrame
     closed_shipped: pd.DataFrame
     supplement_audit: pd.DataFrame
+    closed_unshipped: pd.DataFrame = field(default_factory=pd.DataFrame)
     issues: tuple[Issue, ...] = ()
 
     @property
@@ -203,11 +204,11 @@ def apply_supplements(
     )
 
 
-def _build_cost_lookup(costs: LoadedTable | None) -> dict[str, tuple[int, int]]:
+def _build_cost_lookup(costs: LoadedTable | None) -> dict[str, tuple[int, int, str]]:
     if costs is None:
         return {}
     return {
-        str(row["编码"]): (int(row["成本_分"]), int(row["运费_分"]))
+        str(row["编码"]): (int(row["成本_分"]), int(row["运费_分"]), str(row.get("产品名称", "")).strip())
         for _, row in costs.data.iterrows()
     }
 
@@ -291,7 +292,7 @@ def _build_freight_plan(
 def _resolve_row(
     row: pd.Series,
     *,
-    cost_lookup: dict[str, tuple[int, int]],
+    cost_lookup: dict[str, tuple[int, int, str]],
     freight_plan: dict[int, tuple[int | None, str, bool]],
 ) -> tuple[dict[str, object], list[Issue]]:
     issues: list[Issue] = []
@@ -373,6 +374,7 @@ def _resolve_row(
 
     return (
         {
+            "产品名称": standard[2] if standard and standard[2] else "未归类",
             "核算成本_分": resolved_cost,
             "成本来源": cost_source,
             "核算运费_分": resolved_freight,
@@ -389,7 +391,7 @@ def _resolve_row(
 def _resolve_frame(
     frame: pd.DataFrame,
     *,
-    cost_lookup: dict[str, tuple[int, int]],
+    cost_lookup: dict[str, tuple[int, int, str]],
     freight_plan: dict[int, tuple[int | None, str, bool]],
 ) -> tuple[pd.DataFrame, list[Issue]]:
     result = frame.copy()
@@ -442,6 +444,17 @@ def resolve_costs_and_freight(
         cost_lookup=cost_lookup,
         freight_plan=freight_plan,
     )
+    closed_unshipped = partitions.closed_unshipped.copy()
+    if not closed_unshipped.empty:
+        closed_unshipped["产品名称"] = closed_unshipped["商家编码"].map(
+            lambda code: (cost_lookup.get(str(code), (0, 0, ""))[2] or "未归类")
+        )
+    closed_unshipped["核算成本_分"] = 0
+    closed_unshipped["成本来源"] = "付款后关闭且无物流业务规则"
+    closed_unshipped["核算运费_分"] = 0
+    closed_unshipped["运费来源"] = "付款后关闭且无物流业务规则"
+    closed_unshipped["运费阻断回退"] = False
+    closed_unshipped["成本运费状态"] = "已核算"
 
     audit = supplement_audit.copy()
     if not audit.empty:
@@ -456,5 +469,6 @@ def resolve_costs_and_freight(
         normal=normal,
         closed_shipped=closed,
         supplement_audit=audit,
+        closed_unshipped=closed_unshipped,
         issues=tuple(partitions.issues) + tuple(normal_issues) + tuple(closed_issues),
     )

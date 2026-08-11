@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
 
 from order_profit.__main__ import main
 from order_profit.inputs import ORDER_COLUMNS
+from order_profit.excel_report import _summary_frame
 
 
 def test_version_option(capsys: pytest.CaptureFixture[str]) -> None:
@@ -21,6 +24,14 @@ def test_version_option(capsys: pytest.CaptureFixture[str]) -> None:
 def test_no_command_prints_help(capsys: pytest.CaptureFixture[str]) -> None:
     assert main([]) == 0
     assert "validate-inputs" in capsys.readouterr().out
+
+
+def test_excel_summary_displays_percentage_points() -> None:
+    result = SimpleNamespace(
+        analysis=SimpleNamespace(summary={"销售额核算覆盖率": Decimal("0.8972")})
+    )
+    row = _summary_frame(result).iloc[0]
+    assert row.to_dict() == {"指标": "销售额核算覆盖率", "值": 89.72, "单位": "%"}
 
 
 def test_validate_inputs_writes_manifest(tmp_path: Path) -> None:

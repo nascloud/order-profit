@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from order_profit.aggregate import aggregate_promotion, build_analysis
+from order_profit.aggregate import PromotionResult, aggregate_promotion, build_analysis
 from order_profit.config import Platform, RunConfig
 from order_profit.inputs import LoadedTable
 from order_profit.models import InputFileMetadata, RunStatus
@@ -128,9 +128,9 @@ def test_promotion_period_and_zero_denominator(tmp_path: Path) -> None:
     assert len(result.out_of_period) == 1
     assert int(result.daily["推广花费_分"].sum()) == 1000
     p1 = result.products[result.products["主体ID"] == "P1"].iloc[0]
-    assert p1["推广ROI"] == Decimal("5")
+    assert p1["推广投产比"] == Decimal("5")
     p2 = result.products[result.products["主体ID"] == "P2"].iloc[0]
-    assert "推广ROI" in p2["零分母状态"]
+    assert "推广投产比" in p2["零分母状态"]
 
 
 def test_link_union_summary_and_reconciliation(tmp_path: Path) -> None:
@@ -142,7 +142,13 @@ def test_link_union_summary_and_reconciliation(tmp_path: Path) -> None:
     assert analysis.summary["订单+推广链接"] == 1
     assert analysis.summary["仅推广链接"] == 1
     assert analysis.summary["已核算销售额_分"] == 10000
-    assert analysis.summary["含推广净利润_分"] == 2553
+    assert analysis.summary["含推广经营贡献利润_分"] == 2553
+    assert analysis.summary["退款订单率"] == Decimal("0.5")
+    assert analysis.summary["付款后关闭率"] == Decimal("0.5")
+    assert analysis.summary["关闭已发货率"] == Decimal("0.5")
+    assert analysis.daily.iloc[0]["成本率"] == Decimal("0.3")
+    assert analysis.daily.iloc[0]["推广费率"] == Decimal("0.1")
+    assert analysis.products.loc[analysis.products["产品名称"] == "未归类", "商品链接数"].iloc[0] == 2
 
     empty = profit.normal.iloc[0:0].copy()
     partitions = OrderPartitions(
@@ -160,3 +166,44 @@ def test_link_union_summary_and_reconciliation(tmp_path: Path) -> None:
     )
     assert result.status is RunStatus.FINAL
     assert all(check.passed for check in result.checks)
+
+
+def test_sabc_and_multi_product_promotion_allocation_are_deterministic(tmp_path: Path) -> None:
+    def row(number: int, link: str, product: str, sales: int, profit: int, status: str = "已核算") -> dict[str, object]:
+        return {
+            "source_row_number": number, "主订单编号": f"O{number}", "商品ID": link,
+            "商品标题": link, "订单付款时间_标准": datetime(2026, 8, 1, tzinfo=TZ),
+            "购买数量_标准": 1, "实收金额_分": sales, "有效退款_分": 0,
+            "核算成本_分": 0 if status == "已核算" else None, "核算运费_分": 0,
+            "平台扣点_分": 0, "综合税赋_分": 0, "正常订单利润_分": profit if status == "已核算" else None,
+            "核算状态": status, "商家编码": f"SKU{number}", "产品名称": product,
+        }
+
+    normal = pd.DataFrame([
+        row(2, "P1", "产品甲", 10000, 6000), row(3, "P1", "产品乙", 5000, 0),
+        row(4, "P2", "产品甲", 3000, 3000), row(5, "P3", "产品甲", 1000, 1000),
+        row(6, "P4", "产品甲", 1000, -100), row(7, "P5", "产品甲", 1000, 0, "成本或运费缺失"),
+    ])
+    profit = ProfitResult(normal, normal.iloc[0:0].copy(), pd.DataFrame())
+    promotion_products = pd.DataFrame([{
+        "主体ID": "P1", "主体名称": "P1", "推广花费_分": 101,
+        "推广归因成交金额_分": 1001, "推广成交笔数": 2,
+        "推广展现量": 0, "推广点击量": 0, "推广投产比": Decimal("9.910891"), "点击率": Decimal("0"),
+    }])
+    promotion = PromotionResult(pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), promotion_products)
+
+    analysis = build_analysis(profit, promotion, _config(tmp_path))
+
+    assert dict(zip(analysis.links["商品ID"], analysis.links["SABC等级"], strict=True)) == {
+        "P1": "S", "P2": "A", "P3": "B", "P4": "C", "P5": "待核算",
+    }
+    allocated = analysis.products.set_index("产品名称")
+    assert int(allocated["推广花费_分"].sum()) == 101
+    assert int(allocated["推广归因成交金额_分"].sum()) == 1001
+    assert allocated.at["产品甲", "推广花费_分"] == 68
+    assert allocated.at["产品乙", "推广花费_分"] == 33
+    assert allocated.at["产品甲", "经营贡献利润率状态"] == "待核算"
+    assert pd.isna(allocated.at["产品甲", "经营贡献利润率"])
+    assert allocated.at["产品乙", "经营贡献利润率"] == Decimal("-0.0066")
+    assert analysis.summary["盈利链接数"] == 3
+    assert analysis.summary["亏损链接数"] == 1

@@ -110,7 +110,12 @@ def validate_and_partition_orders(config: RunConfig) -> ValidationResult:
     profit = calculate_order_profit(cost_result, config)
     profit = reconcile_after_sales(profit, loaded.get("after_sales"), config)
     promotion = aggregate_promotion(loaded.get("promotion"), config)
-    analysis = build_analysis(profit, promotion, config)
+    provisional = (
+        profit.incomplete_rows > 0
+        or not partitions.missing_merchant_code.empty
+        or not partitions.payment_anomaly.empty
+    )
+    analysis = build_analysis(profit, promotion, config, provisional=provisional)
     reconciliation = validate_reconciliation(
         analysis,
         partitions,

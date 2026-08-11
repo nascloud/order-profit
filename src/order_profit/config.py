@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from pathlib import Path
+import json
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -35,6 +36,36 @@ PLATFORM_FEE_RATES: dict[Platform, Decimal] = {
 }
 TAX_RATE = Decimal("0.023")
 SPEC_VERSION = "1.1"
+DEFAULT_S_PROFIT_SHARE = Decimal("0.50")
+DEFAULT_A_PROFIT_SHARE = Decimal("0.80")
+
+
+def load_sabc_config(path: Path | None) -> tuple[Decimal, Decimal]:
+    if path is None:
+        return DEFAULT_S_PROFIT_SHARE, DEFAULT_A_PROFIT_SHARE
+    try:
+        values = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ConfigurationError(f"无法读取 SABC 配置：{exc}", code="SABC_CONFIG_INVALID") from exc
+    expected = {"s_profit_share", "a_profit_share"}
+    if not isinstance(values, dict) or set(values) != expected:
+        raise ConfigurationError(
+            "SABC 配置必须且只能包含 s_profit_share、a_profit_share",
+            code="SABC_CONFIG_FIELDS_INVALID",
+        )
+    try:
+        s_share = Decimal(str(values["s_profit_share"]))
+        a_share = Decimal(str(values["a_profit_share"]))
+    except Exception as exc:
+        raise ConfigurationError("SABC 阈值必须是数字", code="SABC_CONFIG_VALUE_INVALID") from exc
+    if not s_share.is_finite() or not a_share.is_finite():
+        raise ConfigurationError("SABC 阈值必须是有限数字", code="SABC_CONFIG_VALUE_INVALID")
+    if not Decimal("0") < s_share < a_share < Decimal("1"):
+        raise ConfigurationError(
+            "SABC 阈值必须满足 0 < s_profit_share < a_profit_share < 1",
+            code="SABC_CONFIG_RANGE_INVALID",
+        )
+    return s_share, a_share
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +91,9 @@ class RunConfig:
     overwrite_existing: bool = False
     require_complete: bool = False
     recalculation: RecalculationMode = RecalculationMode.DISABLED
+    sabc_config: Path | None = None
+    s_profit_share: Decimal = field(default=DEFAULT_S_PROFIT_SHARE, init=False)
+    a_profit_share: Decimal = field(default=DEFAULT_A_PROFIT_SHARE, init=False)
 
     def __post_init__(self) -> None:
         if self.start_date > self.end_date:
@@ -78,6 +112,9 @@ class RunConfig:
                 f"未知时区：{self.timezone}",
                 code="CONFIG_TIMEZONE_INVALID",
             ) from exc
+        s_share, a_share = load_sabc_config(self.sabc_config)
+        object.__setattr__(self, "s_profit_share", s_share)
+        object.__setattr__(self, "a_profit_share", a_share)
 
     @property
     def platform_fee_rate(self) -> Decimal:
@@ -121,6 +158,8 @@ class RunConfig:
                 result[key] = value.isoformat()
             elif isinstance(value, StrEnum):
                 result[key] = value.value
+            elif isinstance(value, Decimal):
+                result[key] = str(value)
         result["platform_fee_rate"] = str(self.platform_fee_rate)
         result["tax_rate"] = str(self.tax_rate)
         result["spec_version"] = SPEC_VERSION

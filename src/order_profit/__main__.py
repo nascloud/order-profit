@@ -37,6 +37,7 @@ def _add_common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--after-sales", type=Path, help="售后 .xlsx 文件")
     parser.add_argument("--promotion", type=Path, help="推广 .csv 文件")
     parser.add_argument("--supplements", type=Path, help="人工补充 .xlsx 文件")
+    parser.add_argument("--sabc-config", type=Path, help="SABC 阈值 UTF-8 JSON 文件")
     parser.add_argument("--start-date", type=_parse_date, required=True, help="开始日期 YYYY-MM-DD")
     parser.add_argument("--end-date", type=_parse_date, required=True, help="结束日期 YYYY-MM-DD")
     parser.add_argument("--platform", choices=tuple(Platform), type=Platform, required=True)
@@ -79,6 +80,7 @@ def _config_from_args(args: argparse.Namespace) -> RunConfig:
         after_sales=args.after_sales,
         promotion=args.promotion,
         supplements=args.supplements,
+        sabc_config=args.sabc_config,
         start_date=args.start_date,
         end_date=args.end_date,
         platform=args.platform,
@@ -127,10 +129,10 @@ def _validate_command(config: RunConfig, *, verbose: bool) -> int:
         len(cost_result.supplement_audit),
     )
     logger.info(
-        "核算摘要：状态 %s，已核算销售额 %.2f 元，含推广净利润 %.2f 元，有效链接 %s",
+        "核算摘要：状态 %s，已核算销售额 %.2f 元，含推广经营贡献利润 %.2f 元，有效链接 %s",
         reconciliation.status.value,
         int(analysis.summary["已核算销售额_分"]) / 100,
-        int(analysis.summary["含推广净利润_分"]) / 100,
+        int(analysis.summary["含推广经营贡献利润_分"]) / 100,
         analysis.summary["有效商品链接"],
     )
     for issue in issues:

@@ -118,6 +118,14 @@ def test_costs_reject_conflicting_duplicate_codes(tmp_path: Path) -> None:
         normalize_costs(table, _config(tmp_path))
 
 
+def test_costs_reject_conflicting_product_names(tmp_path: Path) -> None:
+    table = _cost_table(tmp_path, pd.DataFrame({
+        "编码": ["SKU1", "SKU1"], "成本": ["1.00", "1.00"], "运费": ["2.00", "2.00"], "产品名称": ["产品A", "产品B"],
+    }))
+    with pytest.raises(InputContractError, match="冲突核算值"):
+        normalize_costs(table, _config(tmp_path))
+
+
 def test_costs_reject_empty_code(tmp_path: Path) -> None:
     table = _cost_table(
         tmp_path,

@@ -68,6 +68,11 @@ def _manifest_for_result(
     manifest["order_partitions"] = result.partitions.counts()
     manifest["summary"] = serialize_summary(result.analysis.summary)
     manifest["reconciliation"] = serialize_reconciliation(result.reconciliation.checks)
+    manifest["sabc"] = {
+        "s_profit_share": str(config.s_profit_share),
+        "a_profit_share": str(config.a_profit_share),
+        "config_path": str(config.sabc_config.resolve()) if config.sabc_config else None,
+    }
     manifest["pending_supplements"] = {
         "file": "待补成本运费.xlsx" if pending_supplement_rows else None,
         "rows": pending_supplement_rows,

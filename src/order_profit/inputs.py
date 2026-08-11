@@ -116,7 +116,7 @@ def _normalize_headers(data: pd.DataFrame, *, path: Path, sheet: str | None) -> 
 
 
 def _normalize_cost_columns(data: pd.DataFrame) -> pd.DataFrame:
-    """兼容成本表业务表头；标准列与别名并存时以标准列为准。"""
+    """将成本表业务表头归一为内部字段名。"""
 
     result = data.copy()
     for alias, target in COST_COLUMN_ALIASES.items():
