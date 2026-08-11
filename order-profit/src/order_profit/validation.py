@@ -120,8 +120,10 @@ def normalize_orders(table: LoadedTable, config: RunConfig) -> LoadedTable:
         timezone=config.timezone,
         allow_missing=True,
     )
-    _map_column(data, "货品成本", "货品成本_分", money_to_cents, allow_missing=True, nonnegative=True)
-    _map_column(data, "运费", "运费_分", money_to_cents, allow_missing=True, nonnegative=True)
+    # 原始订单导出不包含成本和运费；统一创建内部空值列，后续分别从
+    # 成本编码表、运费表或人工补充表解析。
+    data["货品成本_分"] = pd.Series([None] * len(data), index=data.index, dtype=object)
+    data["运费_分"] = pd.Series([None] * len(data), index=data.index, dtype=object)
 
     # 购买数量、货款和退款的必填性依赖 P4 清洗与分类；这里只拒绝非空非法值。
     data["购买数量_标准"] = [

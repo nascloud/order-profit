@@ -158,22 +158,21 @@ def apply_supplements(
                 code_reason = "已应用"
             else:
                 code_reason = "补充字段为空"
-            missing_items = str(supplement.get("缺失项目", ""))
             applied_cost, cost_reason = _apply_supplement_field(
                 result,
                 target_index=target_index,
                 supplement_value=supplement.get("货品成本_分"),
-                existing_value=result.at[target_index, "货品成本_分"],
+                existing_value=result.at[target_index, "补充货品成本_分"],
                 target_column="补充货品成本_分",
-                overwrite_existing=overwrite_existing or "成本" in missing_items,
+                overwrite_existing=overwrite_existing,
             )
             applied_freight, freight_reason = _apply_supplement_field(
                 result,
                 target_index=target_index,
                 supplement_value=supplement.get("运费_分"),
-                existing_value=result.at[target_index, "运费_分"],
+                existing_value=result.at[target_index, "补充运费_分"],
                 target_column="补充运费_分",
-                overwrite_existing=overwrite_existing or "运费" in missing_items,
+                overwrite_existing=overwrite_existing,
             )
             result.at[target_index, "补充记录源行"] = int(supplement["source_row_number"])
 
@@ -302,19 +301,15 @@ def _resolve_row(
     price_difference = bool(row.get("是否补差价专用", False))
 
     supplement_cost = row.get("补充货品成本_分")
-    existing_cost = row.get("货品成本_分")
     if price_difference:
         resolved_cost: int | None = 0
         cost_source = "补差价专用业务规则"
-    elif not is_missing(supplement_cost):
-        resolved_cost = int(supplement_cost)
-        cost_source = "人工补充"
-    elif not is_missing(existing_cost):
-        resolved_cost = int(existing_cost)
-        cost_source = "订单表已有"
     elif standard is not None:
         resolved_cost = int(standard[0]) * quantity
         cost_source = "成本编码表"
+    elif not is_missing(supplement_cost):
+        resolved_cost = int(supplement_cost)
+        cost_source = "人工补充"
     else:
         resolved_cost = None
         cost_source = "缺失"
@@ -330,17 +325,13 @@ def _resolve_row(
         )
 
     supplement_freight = row.get("补充运费_分")
-    existing_freight = row.get("运费_分")
     waybill = str(row.get("物流单号") or "")
     planned_freight, planned_source, planned_blocked = freight_plan.get(
         int(row["source_row_number"]),
         (None, "", False),
     )
     freight_blocked = False
-    if not is_missing(supplement_freight):
-        resolved_freight: int | None = int(supplement_freight)
-        freight_source = "人工补充"
-    elif planned_blocked:
+    if planned_blocked:
         resolved_freight = None
         freight_source = planned_source
         freight_blocked = True
@@ -357,12 +348,12 @@ def _resolve_row(
     elif planned_source:
         resolved_freight = int(planned_freight)
         freight_source = planned_source
-    elif not is_missing(existing_freight):
-        resolved_freight = int(existing_freight)
-        freight_source = "订单表已有"
     elif standard is not None:
         resolved_freight = int(standard[1])
         freight_source = "成本编码表标准运费"
+    elif not is_missing(supplement_freight):
+        resolved_freight = int(supplement_freight)
+        freight_source = "人工补充"
     elif price_difference:
         resolved_freight = 0
         freight_source = "补差价专用业务规则"

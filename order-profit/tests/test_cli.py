@@ -59,6 +59,70 @@ def test_validate_inputs_writes_manifest(tmp_path: Path) -> None:
     assert all(check["passed"] for check in manifest["reconciliation"])
 
 
+def test_validate_complete_order_without_source_cost_or_freight_columns(
+    tmp_path: Path,
+) -> None:
+    orders = tmp_path / "orders.xlsx"
+    costs = tmp_path / "costs.xlsx"
+    freight = tmp_path / "freight.xlsx"
+    output = tmp_path / "output"
+    values = {column: [""] for column in sorted(ORDER_COLUMNS)}
+    values.update(
+        {
+            "主订单编号": ["001"],
+            "商品ID": ["1001"],
+            "商品标题": ["测试商品"],
+            "商品属性": ["颜色:白色"],
+            "购买数量": [2],
+            "订单状态": ["交易成功"],
+            "商家编码": ["SKU1"],
+            "买家应付货款": ["20.00"],
+            "退款状态": ["无退款"],
+            "订单付款时间": ["2026-08-01 00:00:00"],
+            "物流单号": ["W1"],
+        }
+    )
+    order_frame = pd.DataFrame(values)
+    assert "货品成本" not in order_frame.columns
+    assert "运费" not in order_frame.columns
+    order_frame.to_excel(orders, sheet_name="export", index=False)
+    pd.DataFrame(
+        {"编码": ["SKU1"], "成本": ["1.50"], "运费": ["3.00"]}
+    ).to_excel(costs, sheet_name="Sheet1", index=False)
+    pd.DataFrame(
+        {"运单号": ["W1"], "订单编码": ["001"], "总运费": ["8.00"]}
+    ).to_excel(freight, sheet_name="Sheet1", index=False)
+
+    result = main(
+        [
+            "validate-inputs",
+            "--orders",
+            str(orders),
+            "--costs",
+            str(costs),
+            "--freight",
+            str(freight),
+            "--start-date",
+            "2026-08-01",
+            "--end-date",
+            "2026-08-07",
+            "--platform",
+            "tmall",
+            "--output-dir",
+            str(output),
+            "--require-complete",
+        ]
+    )
+
+    assert result == 0
+    manifest = json.loads((output / "validation-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["status"] == "FINAL"
+    assert manifest["cost_freight"]["missing_cost_rows"] == 0
+    assert manifest["cost_freight"]["missing_freight_rows"] == 0
+    assert manifest["summary"]["已核算货品成本_分"] == 300
+    assert manifest["summary"]["已核算运费_分"] == 800
+
+
 def test_require_complete_returns_nonzero_for_provisional_result(tmp_path: Path) -> None:
     orders = tmp_path / "orders.xlsx"
     values = {column: [""] for column in sorted(ORDER_COLUMNS)}

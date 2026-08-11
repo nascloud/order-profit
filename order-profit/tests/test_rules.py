@@ -196,7 +196,7 @@ def test_missing_code_with_supplemented_cost_and_freight_enters_normal(
     assert result.normal.iloc[0]["商家编码"] == ""
 
 
-def test_missing_code_with_existing_cost_and_freight_enters_normal(
+def test_missing_code_ignores_internal_order_amount_placeholders(
     tmp_path: Path,
 ) -> None:
     table = _table(
@@ -206,8 +206,8 @@ def test_missing_code_with_existing_cost_and_freight_enters_normal(
 
     result = partition_orders(table, _config(tmp_path))
 
-    assert len(result.normal) == 1
-    assert result.missing_merchant_code.empty
+    assert result.normal.empty
+    assert len(result.missing_merchant_code) == 1
 
 
 def test_missing_code_with_only_one_amount_stays_missing_code(tmp_path: Path) -> None:

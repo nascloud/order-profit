@@ -189,15 +189,11 @@ def _validate_accountable_order(row: pd.Series, *, normal: bool) -> int:
 
 
 def _has_direct_cost_and_freight(row: pd.Series) -> bool:
-    """无编码明细在成本、运费均有明确金额时仍可核算。"""
+    """无编码明细在人工补充成本、运费均明确时仍可核算。"""
 
-    has_cost = not is_missing(row.get("补充货品成本_分")) or not is_missing(
-        row.get("货品成本_分")
+    return not is_missing(row.get("补充货品成本_分")) and not is_missing(
+        row.get("补充运费_分")
     )
-    has_freight = not is_missing(row.get("补充运费_分")) or not is_missing(
-        row.get("运费_分")
-    )
-    return has_cost and has_freight
 
 
 def classify_orders(data: pd.DataFrame) -> tuple[dict[OrderPartition, pd.DataFrame], tuple[Issue, ...]]:

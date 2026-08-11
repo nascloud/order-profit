@@ -76,11 +76,11 @@ def _partitions(normal: pd.DataFrame, closed: pd.DataFrame | None = None) -> Ord
     )
 
 
-def test_supplement_matches_full_source_and_respects_overwrite(tmp_path: Path) -> None:
+def test_supplement_matches_full_source_without_order_amount_columns(tmp_path: Path) -> None:
     orders = _loaded(
         tmp_path,
         "orders",
-        [_order(2, 货品成本_分=500, 运费_分=None)],
+        [_order(2)],
     )
     supplements = _loaded(
         tmp_path,
@@ -97,14 +97,11 @@ def test_supplement_matches_full_source_and_respects_overwrite(tmp_path: Path) -
         ],
     )
 
-    without_overwrite = apply_supplements(orders, supplements, overwrite_existing=False)
-    assert without_overwrite.orders.data.iloc[0]["补充货品成本_分"] is None
-    assert without_overwrite.orders.data.iloc[0]["补充运费_分"] == 20
-    assert without_overwrite.audit.iloc[0]["成本处理原因"] == "目标已有值且未启用覆盖"
-
-    with_overwrite = apply_supplements(orders, supplements, overwrite_existing=True)
-    assert with_overwrite.orders.data.iloc[0]["补充货品成本_分"] == 100
-    assert with_overwrite.orders.data.iloc[0]["补充运费_分"] == 20
+    result = apply_supplements(orders, supplements, overwrite_existing=False)
+    assert result.orders.data.iloc[0]["补充货品成本_分"] == 100
+    assert result.orders.data.iloc[0]["补充运费_分"] == 20
+    assert bool(result.audit.iloc[0]["成本已应用"])
+    assert bool(result.audit.iloc[0]["运费已应用"])
 
 
 def test_generated_missing_freight_can_override_blocking_source_value(
@@ -172,11 +169,13 @@ def test_supplement_rejects_missing_or_non_unique_target(tmp_path: Path) -> None
         apply_supplements(duplicate_orders, supplement, overwrite_existing=False)
 
 
-def test_cost_and_freight_priority(tmp_path: Path) -> None:
+def test_manual_supplement_is_only_used_when_reference_tables_do_not_resolve(
+    tmp_path: Path,
+) -> None:
     normal = pd.DataFrame(
         [
             _order(2, 补充货品成本_分=111, 补充运费_分=22, 物流单号="W2"),
-            _order(3, 货品成本_分=300, 运费_分=30, 物流单号="W3"),
+            _order(3, 补充货品成本_分=333, 补充运费_分=44, 物流单号="MISSING"),
             _order(4, 商家编码="SKU4", 购买数量_标准=3),
         ]
     )
@@ -185,7 +184,6 @@ def test_cost_and_freight_priority(tmp_path: Path) -> None:
         "costs",
         [
             {"编码": "SKU2", "成本_分": 900, "运费_分": 90},
-            {"编码": "SKU3", "成本_分": 900, "运费_分": 90},
             {"编码": "SKU4", "成本_分": 125, "运费_分": 45},
         ],
     )
@@ -194,7 +192,6 @@ def test_cost_and_freight_priority(tmp_path: Path) -> None:
         "freight",
         [
             {"运单号": "W2", "总运费_分": 999},
-            {"运单号": "W3", "总运费_分": 333},
         ],
     )
 
@@ -206,10 +203,10 @@ def test_cost_and_freight_priority(tmp_path: Path) -> None:
     )
 
     first, second, third = [row for _, row in result.normal.iterrows()]
-    assert (first["核算成本_分"], first["成本来源"]) == (111, "人工补充")
-    assert (first["核算运费_分"], first["运费来源"]) == (22, "人工补充")
-    assert (second["核算成本_分"], second["成本来源"]) == (300, "订单表已有")
-    assert (second["核算运费_分"], second["运费来源"]) == (333, "运费表实际运费")
+    assert (first["核算成本_分"], first["成本来源"]) == (900, "成本编码表")
+    assert (first["核算运费_分"], first["运费来源"]) == (999, "运费表实际运费")
+    assert (second["核算成本_分"], second["成本来源"]) == (333, "人工补充")
+    assert (second["核算运费_分"], second["运费来源"]) == (44, "人工补充")
     assert (third["核算成本_分"], third["成本来源"]) == (375, "成本编码表")
     assert (third["核算运费_分"], third["运费来源"]) == (45, "成本编码表标准运费")
 

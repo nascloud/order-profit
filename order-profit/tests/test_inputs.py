@@ -6,11 +6,24 @@ import pandas as pd
 import pytest
 
 from order_profit.errors import InputContractError
-from order_profit.inputs import ORDER_COLUMNS, load_orders, load_promotion
+from order_profit.inputs import ORDER_COLUMNS, load_costs, load_orders, load_promotion
 
 
 def _valid_order_data() -> dict[str, list[object]]:
     return {column: [""] for column in sorted(ORDER_COLUMNS)}
+
+
+def test_load_orders_allows_source_without_cost_or_freight_columns(tmp_path: Path) -> None:
+    path = tmp_path / "orders.xlsx"
+    data = _valid_order_data()
+    data["主订单编号"] = ["001"]
+    pd.DataFrame(data).to_excel(path, sheet_name="export", index=False)
+
+    loaded = load_orders(path)
+
+    assert "货品成本" not in loaded.data.columns
+    assert "运费" not in loaded.data.columns
+    assert loaded.metadata.rows == 1
 
 
 def test_load_orders_trims_headers_and_records_metadata(tmp_path: Path) -> None:
@@ -62,7 +75,44 @@ def test_load_orders_rejects_duplicate_headers_after_trimming(tmp_path: Path) ->
         load_orders(path)
 
 
-def test_promotion_falls_back_to_gb18030(tmp_path: Path) -> None:
+def test_load_costs_accepts_business_header_aliases(tmp_path: Path) -> None:
+    path = tmp_path / "costs.xlsx"
+    pd.DataFrame(
+        {
+            "商家编码": ["SKU1"],
+            "单件成本": ["12.50"],
+            "单件运费": ["8.00"],
+            "编码": ["SKU1"],
+        }
+    ).to_excel(path, sheet_name="Sheet1", index=False)
+
+    loaded = load_costs(path)
+
+    assert loaded.data.columns.tolist() == ["成本", "运费", "编码"]
+    assert loaded.data.iloc[0].to_dict() == {
+        "成本": "12.50",
+        "运费": "8.00",
+        "编码": "SKU1",
+    }
+
+
+def test_load_costs_prefers_standard_code_when_alias_differs(tmp_path: Path) -> None:
+    path = tmp_path / "costs.xlsx"
+    pd.DataFrame(
+        {
+            "商家编码": ["02-SKU1"],
+            "单件成本": ["12.50"],
+            "单件运费": ["8.00"],
+            "编码": ["SKU1"],
+        }
+    ).to_excel(path, sheet_name="Sheet1", index=False)
+
+    loaded = load_costs(path)
+
+    assert loaded.data.iloc[0]["编码"] == "SKU1"
+    assert "商家编码" not in loaded.data.columns
+
+
     path = tmp_path / "promotion.csv"
     data = pd.DataFrame(
         {

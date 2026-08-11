@@ -27,11 +27,14 @@ ORDER_COLUMNS: Final[frozenset[str]] = frozenset(
         "订单付款时间",
         "商家备注",
         "物流单号",
-        "货品成本",
-        "运费",
     }
 )
 COST_COLUMNS: Final[frozenset[str]] = frozenset({"编码", "成本", "运费"})
+COST_COLUMN_ALIASES: Final[dict[str, str]] = {
+    "商家编码": "编码",
+    "单件成本": "成本",
+    "单件运费": "运费",
+}
 FREIGHT_COLUMNS: Final[frozenset[str]] = frozenset({"运单号", "订单编码", "总运费"})
 AFTER_SALES_COLUMNS: Final[frozenset[str]] = frozenset(
     {"订单编号", "退款编号", "退款状态", "退款总额", "退款完结时间"}
@@ -109,6 +112,20 @@ def _normalize_headers(data: pd.DataFrame, *, path: Path, sheet: str | None) -> 
 
     result = data.copy()
     result.columns = normalized
+    return result
+
+
+def _normalize_cost_columns(data: pd.DataFrame) -> pd.DataFrame:
+    """兼容成本表业务表头；标准列与别名并存时以标准列为准。"""
+
+    result = data.copy()
+    for alias, target in COST_COLUMN_ALIASES.items():
+        if alias not in result.columns:
+            continue
+        if target not in result.columns:
+            result = result.rename(columns={alias: target})
+        else:
+            result = result.drop(columns=[alias])
     return result
 
 
@@ -245,7 +262,20 @@ def load_orders(path: Path, sheet: str = "export") -> LoadedTable:
 
 
 def load_costs(path: Path, sheet: str = "Sheet1") -> LoadedTable:
-    return _read_excel(path, role="成本编码表", sheet=sheet, required=COST_COLUMNS)
+    table = _read_excel(
+        path,
+        role="成本编码表",
+        sheet=sheet,
+        required=frozenset(),
+    )
+    data = _normalize_cost_columns(table.data)
+    _validate_columns(
+        data,
+        required=COST_COLUMNS,
+        path=table.metadata.path,
+        sheet=table.metadata.sheet,
+    )
+    return LoadedTable(data=data, metadata=table.metadata, issues=table.issues)
 
 
 def load_freight(path: Path, sheet: str | None = None) -> LoadedTable:
