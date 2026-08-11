@@ -102,3 +102,6 @@ def test_html_escapes_business_text_and_embeds_safe_json(tmp_path: Path) -> None
     assert "term('关闭已发货损失'" in page
     assert "term('净销售额',S['净销售额_分'],'result'" in page
     assert "占已核算销售额 ${share(accountedRefund,accounted)}" in page
+    assert "占净销售额 ${share(S['已核算平台扣点_分'],accountedNet)}" in page
+    assert "占已核算净销售额 ${pct(accountedNet?S['推广花费_分']/accountedNet:null)}" in page
+    assert ".equation:not(.profit-equation) .term{width:220px}" in page

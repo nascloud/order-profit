@@ -146,8 +146,11 @@ def test_link_union_summary_and_reconciliation(tmp_path: Path) -> None:
     assert analysis.summary["退款订单率"] == Decimal("0.5")
     assert analysis.summary["付款后关闭率"] == Decimal("0.5")
     assert analysis.summary["关闭已发货率"] == Decimal("0.5")
-    assert analysis.daily.iloc[0]["成本率"] == Decimal("0.3")
-    assert analysis.daily.iloc[0]["推广费率"] == Decimal("0.1")
+    assert analysis.daily.iloc[0]["成本率"] == Decimal(3000) / Decimal(9000)
+    assert analysis.daily.iloc[0]["平台费率"] == Decimal("0.06")
+    assert analysis.daily.iloc[0]["税费率"] == Decimal("0.023")
+    assert analysis.daily.iloc[0]["推广费率"] == Decimal(1000) / Decimal(9000)
+    assert analysis.summary["经营贡献利润率"] == Decimal(2553) / Decimal(9000)
     assert analysis.products.loc[analysis.products["产品名称"] == "未归类", "商品链接数"].iloc[0] == 2
 
     empty = profit.normal.iloc[0:0].copy()

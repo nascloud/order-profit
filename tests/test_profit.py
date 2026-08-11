@@ -50,7 +50,7 @@ def test_normal_profit_includes_refund_platform_fee_and_tax(tmp_path: Path) -> N
     assert row["平台扣点_分"] == 540
     assert row["综合税赋_分"] == 207
     assert row["正常订单利润_分"] == 4753
-    assert row["利润率"] == Decimal("0.4753")
+    assert row["利润率"] == Decimal(4753) / Decimal(9000)
 
 
 def test_missing_cost_keeps_profit_empty_but_still_calculates_fees(tmp_path: Path) -> None:

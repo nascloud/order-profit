@@ -152,6 +152,9 @@ def build_link_report(profit: ProfitResult, promotion: PromotionResult, config: 
         closed_complete = complete[complete["订单类型"] == "付款后关闭已发货"] if not complete.empty else complete
         p = promo.get(link_id, {})
         sales, refunds = _sum(orders, "实收金额_分"), _sum(orders, "有效退款_分")
+        accounted_sales = _sum(complete, "实收金额_分")
+        accounted_refunds = _sum(complete, "有效退款_分")
+        accounted_net = accounted_sales - accounted_refunds
         spend, attributed = int(p.get("推广花费_分", 0)), int(p.get("推广归因成交金额_分", 0))
         operating_profit = _row_profit(complete)
         contribution = operating_profit - spend
@@ -178,9 +181,9 @@ def build_link_report(profit: ProfitResult, promotion: PromotionResult, config: 
             "主订单数": int(orders["主订单编号"].nunique()) if not orders.empty else 0,
             "购买数量": _sum(orders, "购买数量_标准"),
             "销售额_分": sales,
-            "已核算销售额_分": _sum(complete, "实收金额_分"),
+            "已核算销售额_分": accounted_sales,
             "订单批次成功退款_分": refunds,
-            "已核算订单批次成功退款_分": _sum(complete, "有效退款_分"),
+            "已核算订单批次成功退款_分": accounted_refunds,
             "货品成本_分": _sum(normal_complete, "核算成本_分"),
             "运费_分": _sum(normal_complete, "核算运费_分"),
             "平台扣点_分": _sum(complete, "平台扣点_分"),
@@ -192,9 +195,9 @@ def build_link_report(profit: ProfitResult, promotion: PromotionResult, config: 
             "推广投产比": p.get("推广投产比", Decimal("0")),
             "推广前经营利润_分": operating_profit,
             "含推广经营贡献利润_分": contribution,
-            "经营贡献利润率": _optional_ratio(contribution, _sum(complete, "实收金额_分")),
+            "经营贡献利润率": _optional_ratio(contribution, accounted_net),
             "销售贡献率": None, "盈利贡献率": None, "亏损占比": None,
-            "退款率": refund_rate, "推广费率": _optional_ratio(spend, _sum(complete, "实收金额_分")),
+            "退款率": refund_rate, "推广费率": _optional_ratio(spend, accounted_net),
             "盈利状态": "待核算" if incomplete else ("盈利" if contribution > 0 else ("亏损" if contribution < 0 else "持平")),
             "成本运费缺失行数": incomplete,
             "运营动作优先级": "高" if incomplete or contribution < 0 else ("中" if tags else "低"),
@@ -326,6 +329,8 @@ def build_daily_report(profit: ProfitResult, promotion: PromotionResult, config:
         p = promo.get(key, {})
         period_refund = _sum(after[after["退款完结时间_标准"].map(lambda value: value.date() == day)], "退款总额_分") if not after.empty else 0
         sales, refunds, spend = _sum(orders, "实收金额_分"), _sum(orders, "有效退款_分"), int(p.get("推广花费_分", 0))
+        accounted_sales = _sum(complete, "实收金额_分")
+        accounted_net = accounted_sales - _sum(complete, "有效退款_分")
         contribution = _row_profit(complete) - spend
         cumulative_sales += sales; cumulative_profit += contribution
         rows.append({
@@ -335,12 +340,12 @@ def build_daily_report(profit: ProfitResult, promotion: PromotionResult, config:
             "关闭已发货损失_分": _sum(closed, "关闭已发货损失_分"), "推广花费_分": spend, "推广归因成交金额_分": int(p.get("推广归因成交金额_分", 0)),
             "推广投产比": p.get("推广投产比"), "推广前经营利润_分": _row_profit(complete), "含推广经营贡献利润_分": contribution,
             "占期间销售比例": _optional_ratio(sales, total_sales), "累计销售额_分": cumulative_sales, "累计经营贡献利润_分": cumulative_profit,
-            "成本率": _optional_ratio(_sum(normal, "核算成本_分"), _sum(complete, "实收金额_分")),
-            "运费率": _optional_ratio(_sum(normal, "核算运费_分"), _sum(complete, "实收金额_分")),
-            "平台费率": _optional_ratio(_sum(complete, "平台扣点_分"), _sum(complete, "实收金额_分")),
-            "税费率": _optional_ratio(_sum(complete, "综合税赋_分"), _sum(complete, "实收金额_分")),
-            "推广费率": _optional_ratio(spend, _sum(complete, "实收金额_分")),
-            "核算覆盖率": _optional_ratio(_sum(complete, "实收金额_分"), sales), "退款率": _optional_ratio(refunds, sales), "经营贡献利润率": _optional_ratio(contribution, _sum(complete, "实收金额_分")),
+            "成本率": _optional_ratio(_sum(normal, "核算成本_分"), accounted_net),
+            "运费率": _optional_ratio(_sum(normal, "核算运费_分"), accounted_net),
+            "平台费率": _optional_ratio(_sum(complete, "平台扣点_分"), accounted_net),
+            "税费率": _optional_ratio(_sum(complete, "综合税赋_分"), accounted_net),
+            "推广费率": _optional_ratio(spend, accounted_net),
+            "核算覆盖率": _optional_ratio(accounted_sales, sales), "退款率": _optional_ratio(refunds, sales), "经营贡献利润率": _optional_ratio(contribution, accounted_net),
         })
         day += timedelta(days=1)
     return pd.DataFrame(rows)
@@ -363,6 +368,8 @@ def build_summary(profit: ProfitResult, promotion: PromotionResult, links: pd.Da
     metrics = _promotion_metrics(promotion.detail)
     sales, accounted = _sum(paid, "实收金额_分"), _sum(complete, "实收金额_分")
     refunds, spend = _sum(paid, "有效退款_分"), int(metrics["推广花费_分"])
+    accounted_refunds = _sum(complete, "有效退款_分")
+    accounted_net = accounted - accounted_refunds
     pre_profit = _row_profit(complete); contribution = pre_profit - spend
     paid_orders = int(paid["主订单编号"].nunique()) if not paid.empty else 0
     refunded_orders = int(paid.loc[paid["有效退款_分"] > 0, "主订单编号"].nunique()) if not paid.empty else 0
@@ -372,10 +379,10 @@ def build_summary(profit: ProfitResult, promotion: PromotionResult, links: pd.Da
     summary: dict[str, object] = {
         "平台": config.platform.value, "平台扣点率": config.platform_fee_rate, "综合税赋率": config.tax_rate,
         "已付款销售额_分": sales, "订单批次成功退款金额_分": refunds, "期间退款完结金额_分": _sum(profit.period_completed_refunds, "退款总额_分"), "净销售额_分": sales - refunds,
-        "已核算销售额_分": accounted, "已核算订单批次成功退款_分": _sum(complete, "有效退款_分"), "已核算货品成本_分": _sum(normal, "核算成本_分"), "已核算运费_分": _sum(normal, "核算运费_分"),
+        "已核算销售额_分": accounted, "已核算订单批次成功退款_分": accounted_refunds, "已核算货品成本_分": _sum(normal, "核算成本_分"), "已核算运费_分": _sum(normal, "核算运费_分"),
         "已核算平台扣点_分": _sum(complete, "平台扣点_分"), "已核算综合税赋_分": _sum(complete, "综合税赋_分"), "关闭已发货损失_分": _sum(closed, "关闭已发货损失_分"),
         "推广花费_分": spend, "推广归因成交金额_分": int(metrics["推广归因成交金额_分"]), "推广投产比": metrics["推广投产比"], "推广前经营利润_分": pre_profit,
-        "含推广经营贡献利润_分": contribution, "经营贡献利润率": _optional_ratio(contribution, accounted), "销售额核算覆盖率": _optional_ratio(accounted, sales),
+        "含推广经营贡献利润_分": contribution, "经营贡献利润率": _optional_ratio(contribution, accounted_net), "销售额核算覆盖率": _optional_ratio(accounted, sales),
         "订单批次退款率": _optional_ratio(refunds, sales), "退款订单率": _optional_ratio(refunded_orders, paid_orders),
         "付款后关闭率": _optional_ratio(closed_orders, paid_orders), "关闭已发货率": _optional_ratio(closed_shipped_orders, paid_orders),
         "明细行核算覆盖率": _optional_ratio(len(complete), len(paid)), "成本运费缺失行数": profit.incomplete_rows,

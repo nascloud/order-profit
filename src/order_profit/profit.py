@@ -72,7 +72,7 @@ def calculate_order_profit(costs: CostResolutionResult, config: RunConfig) -> Pr
         complete = not is_missing(cost) and not is_missing(freight)
         if complete:
             profit = receipt - refund - int(cost) - int(freight) - platform_fee - tax
-            margin = Decimal(profit) / Decimal(receipt) if receipt else Decimal("0")
+            margin = Decimal(profit) / Decimal(base) if base else Decimal("0")
             status = "已核算"
         else:
             profit = None
@@ -84,7 +84,7 @@ def calculate_order_profit(costs: CostResolutionResult, config: RunConfig) -> Pr
         taxes.append(tax)
         profits.append(profit)
         margins.append(margin)
-        zero_denominator.append(receipt == 0)
+        zero_denominator.append(base == 0)
         statuses.append(status)
         if refund > receipt:
             issues.append(_refund_exceeds_receipt_issue(row, receipt, refund))
