@@ -20,6 +20,7 @@ from order_profit.runtime import (
     serialize_summary,
     write_manifest,
 )
+from order_profit.supplement_report import write_pending_supplements
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +28,7 @@ class PublishedReports:
     excel: Path
     html: Path
     manifest: Path
+    pending_supplements: Path | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,7 +51,12 @@ def execute_run(config: RunConfig) -> RunOutcome:
     return RunOutcome(result=result, reports=publish_reports(result, config))
 
 
-def _manifest_for_result(result: ValidationResult, config: RunConfig) -> dict:
+def _manifest_for_result(
+    result: ValidationResult,
+    config: RunConfig,
+    *,
+    pending_supplement_rows: int = 0,
+) -> dict:
     manifest = build_manifest(
         config=config,
         status=result.reconciliation.status,
@@ -61,6 +68,10 @@ def _manifest_for_result(result: ValidationResult, config: RunConfig) -> dict:
     manifest["order_partitions"] = result.partitions.counts()
     manifest["summary"] = serialize_summary(result.analysis.summary)
     manifest["reconciliation"] = serialize_reconciliation(result.reconciliation.checks)
+    manifest["pending_supplements"] = {
+        "file": "待补成本运费.xlsx" if pending_supplement_rows else None,
+        "rows": pending_supplement_rows,
+    }
     return manifest
 
 
@@ -77,10 +88,30 @@ def publish_reports(result: ValidationResult, config: RunConfig) -> PublishedRep
         excel = temporary / "订单成本利润分析.xlsx"
         html = temporary / "店铺经营复盘.html"
         manifest_path = temporary / "manifest.json"
+        pending_path = temporary / "待补成本运费.xlsx"
         write_excel(result, config, excel)
+        pending_rows = (
+            write_pending_supplements(
+                result,
+                pending_path,
+                supplements=result.tables.get("supplements"),
+            )
+            if result.reconciliation.status.value == "PROVISIONAL"
+            else 0
+        )
         write_html(result, config, html)
-        write_manifest(_manifest_for_result(result, config), manifest_path)
-        if not excel.exists() or not html.exists() or not manifest_path.exists():
+        write_manifest(
+            _manifest_for_result(
+                result,
+                config,
+                pending_supplement_rows=pending_rows,
+            ),
+            manifest_path,
+        )
+        required_files = [excel, html, manifest_path]
+        if pending_rows:
+            required_files.append(pending_path)
+        if not all(file.exists() for file in required_files):
             raise OutputError("报告文件未全部生成", code="OUTPUT_FILES_MISSING")
         json.loads(manifest_path.read_text(encoding="utf-8"))
 
@@ -103,4 +134,7 @@ def publish_reports(result: ValidationResult, config: RunConfig) -> PublishedRep
         excel=destination / excel.name,
         html=destination / html.name,
         manifest=destination / manifest_path.name,
+        pending_supplements=(
+            destination / pending_path.name if pending_rows else None
+        ),
     )

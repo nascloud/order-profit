@@ -102,6 +102,13 @@ def apply_supplements(
     for _, supplement in supplements.data.iterrows():
         key = _key_tuple(supplement)
         matched = order_key_groups.get(key, [])
+        detail_number = supplement.get("明细序号")
+        if not is_missing(detail_number):
+            matched = [
+                index
+                for index in matched
+                if int(result.at[index, "source_row_number"]) == int(detail_number)
+            ]
         if not matched:
             issue = Issue(
                 code="SUPPLEMENT_TARGET_NOT_FOUND",
@@ -126,18 +133,39 @@ def apply_supplements(
         target_index = matched[0]
         status = str(supplement["补充状态"])
         active = status in ACTIVE_SUPPLEMENT_STATUSES
+        applied_code = False
+        code_reason = "状态不生效"
         applied_cost = False
         applied_freight = False
         cost_reason = "状态不生效"
         freight_reason = "状态不生效"
         if active:
+            supplemental_code = str(supplement.get("补充商家编码", "")).strip()
+            existing_code = str(result.at[target_index, "商家编码"]).strip()
+            if supplemental_code:
+                if existing_code:
+                    issue = Issue(
+                        code="SUPPLEMENT_CODE_OVERWRITE_FORBIDDEN",
+                        severity=Severity.ERROR,
+                        message="已有商家编码的订单不允许通过补充表覆盖编码",
+                        location=_location(supplement, "补充商家编码"),
+                        raw_value={"existing": existing_code, "supplement": supplemental_code},
+                        suggestion="清空补充商家编码；如编码确有错误，请修正源订单后重试",
+                    )
+                    raise InputContractError(issue.message, code=issue.code, issues=[issue])
+                result.at[target_index, "商家编码"] = supplemental_code
+                applied_code = True
+                code_reason = "已应用"
+            else:
+                code_reason = "补充字段为空"
+            missing_items = str(supplement.get("缺失项目", ""))
             applied_cost, cost_reason = _apply_supplement_field(
                 result,
                 target_index=target_index,
                 supplement_value=supplement.get("货品成本_分"),
                 existing_value=result.at[target_index, "货品成本_分"],
                 target_column="补充货品成本_分",
-                overwrite_existing=overwrite_existing,
+                overwrite_existing=overwrite_existing or "成本" in missing_items,
             )
             applied_freight, freight_reason = _apply_supplement_field(
                 result,
@@ -145,7 +173,7 @@ def apply_supplements(
                 supplement_value=supplement.get("运费_分"),
                 existing_value=result.at[target_index, "运费_分"],
                 target_column="补充运费_分",
-                overwrite_existing=overwrite_existing,
+                overwrite_existing=overwrite_existing or "运费" in missing_items,
             )
             result.at[target_index, "补充记录源行"] = int(supplement["source_row_number"])
 
@@ -153,9 +181,15 @@ def apply_supplements(
             {
                 **{column: supplement[column] for column in SUPPLEMENT_KEYS},
                 "补充状态": status,
+                "明细序号": (
+                    int(detail_number) if not is_missing(detail_number) else None
+                ),
                 "补充表源行": int(supplement["source_row_number"]),
                 "匹配订单源行": int(result.at[target_index, "source_row_number"]),
                 "匹配订单分区": None,
+                "编码已应用": applied_code,
+                "编码处理原因": code_reason,
+                "最终商家编码": str(result.at[target_index, "商家编码"]),
                 "成本已应用": applied_cost,
                 "成本处理原因": cost_reason,
                 "运费已应用": applied_freight,

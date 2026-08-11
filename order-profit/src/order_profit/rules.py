@@ -146,14 +146,14 @@ def filter_period(
     return retained, out_of_period
 
 
-def _validate_coded_order(row: pd.Series, *, normal: bool) -> int:
+def _validate_accountable_order(row: pd.Series, *, normal: bool) -> int:
     """校验进入正常/关闭已发货核算的必需字段。"""
 
     if not _text(row.get("商品ID")):
         issue = Issue(
             code="ORDER_PRODUCT_ID_REQUIRED",
             severity=Severity.ERROR,
-            message="有编码的有效正常/关闭已发货订单商品ID不能为空",
+            message="可核算的有效正常/关闭已发货订单商品ID不能为空",
             location=_location(row, "商品ID"),
             raw_value=row.get("商品ID"),
             suggestion="请补齐商品ID后重试，程序不能猜测链接归属",
@@ -188,6 +188,18 @@ def _validate_coded_order(row: pd.Series, *, normal: bool) -> int:
     return quantity
 
 
+def _has_direct_cost_and_freight(row: pd.Series) -> bool:
+    """无编码明细在成本、运费均有明确金额时仍可核算。"""
+
+    has_cost = not is_missing(row.get("补充货品成本_分")) or not is_missing(
+        row.get("货品成本_分")
+    )
+    has_freight = not is_missing(row.get("补充运费_分")) or not is_missing(
+        row.get("运费_分")
+    )
+    return has_cost and has_freight
+
+
 def classify_orders(data: pd.DataFrame) -> tuple[dict[OrderPartition, pd.DataFrame], tuple[Issue, ...]]:
     """把期间内订单分为四个互斥业务分区。"""
 
@@ -195,7 +207,13 @@ def classify_orders(data: pd.DataFrame) -> tuple[dict[OrderPartition, pd.DataFra
     merchant_code = data["商家编码"].map(_text)
     eligible_status = status.isin(NORMAL_STATUSES | {CLOSED_STATUS})
     price_difference_mask = data.apply(is_price_difference, axis=1)
-    missing_code_mask = eligible_status & merchant_code.eq("") & ~price_difference_mask
+    direct_amounts_mask = data.apply(_has_direct_cost_and_freight, axis=1)
+    missing_code_mask = (
+        eligible_status
+        & merchant_code.eq("")
+        & ~price_difference_mask
+        & ~direct_amounts_mask
+    )
     normal_mask = status.isin(NORMAL_STATUSES) & ~missing_code_mask
     closed_mask = status.eq(CLOSED_STATUS) & ~missing_code_mask
     other_mask = ~(missing_code_mask | normal_mask | closed_mask)
@@ -216,7 +234,7 @@ def classify_orders(data: pd.DataFrame) -> tuple[dict[OrderPartition, pd.DataFra
             frame["购买数量_标准"] = pd.Series(index=frame.index, dtype=object)
             continue
         quantities = [
-            _validate_coded_order(row, normal=partition is OrderPartition.NORMAL_CODED)
+            _validate_accountable_order(row, normal=partition is OrderPartition.NORMAL_CODED)
             for _, row in frame.iterrows()
         ]
         frame["购买数量_标准"] = quantities

@@ -17,6 +17,7 @@ ORDER_COLUMNS: Final[frozenset[str]] = frozenset(
         "主订单编号",
         "商品ID",
         "商品标题",
+        "商品属性",
         "购买数量",
         "订单状态",
         "商家编码",
@@ -40,6 +41,9 @@ PROMOTION_COLUMNS: Final[frozenset[str]] = frozenset(
 )
 SUPPLEMENT_COLUMNS: Final[frozenset[str]] = frozenset(
     {"主订单编号", "商品ID", "商家编码", "货品成本", "运费", "补充状态"}
+)
+SUPPLEMENT_OPTIONAL_COLUMNS: Final[frozenset[str]] = frozenset(
+    {"明细序号", "补充商家编码"}
 )
 
 

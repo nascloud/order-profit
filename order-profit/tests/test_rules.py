@@ -52,6 +52,10 @@ def _row(number: int, **overrides: object) -> dict[str, object]:
         "物流单号": "W1",
         "购买数量": 1,
         "购买数量_标准": 1,
+        "货品成本_分": None,
+        "运费_分": None,
+        "补充货品成本_分": None,
+        "补充运费_分": None,
     }
     values.update(overrides)
     return values
@@ -168,6 +172,54 @@ def test_period_is_half_open_and_partitions_are_mutually_exclusive(tmp_path: Pat
         "ORDER_MERCHANT_CODE_MISSING",
         "ORDER_STATUS_UNRECOGNIZED",
     }
+
+
+def test_missing_code_with_supplemented_cost_and_freight_enters_normal(
+    tmp_path: Path,
+) -> None:
+    table = _table(
+        tmp_path,
+        [
+            _row(
+                2,
+                商家编码="",
+                补充货品成本_分=1200,
+                补充运费_分=800,
+            )
+        ],
+    )
+
+    result = partition_orders(table, _config(tmp_path))
+
+    assert len(result.normal) == 1
+    assert result.missing_merchant_code.empty
+    assert result.normal.iloc[0]["商家编码"] == ""
+
+
+def test_missing_code_with_existing_cost_and_freight_enters_normal(
+    tmp_path: Path,
+) -> None:
+    table = _table(
+        tmp_path,
+        [_row(2, 商家编码="", 货品成本_分=1200, 运费_分=800)],
+    )
+
+    result = partition_orders(table, _config(tmp_path))
+
+    assert len(result.normal) == 1
+    assert result.missing_merchant_code.empty
+
+
+def test_missing_code_with_only_one_amount_stays_missing_code(tmp_path: Path) -> None:
+    table = _table(
+        tmp_path,
+        [_row(2, 商家编码="", 补充货品成本_分=1200)],
+    )
+
+    result = partition_orders(table, _config(tmp_path))
+
+    assert result.normal.empty
+    assert len(result.missing_merchant_code) == 1
 
 
 def test_price_difference_enters_normal_without_code(tmp_path: Path) -> None:

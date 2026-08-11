@@ -168,6 +168,8 @@ def _run_command(config: RunConfig, *, verbose: bool) -> int:
     logger.info("Excel：%s", outcome.reports.excel)
     logger.info("运营复盘 HTML：%s", outcome.reports.html)
     logger.info("运行清单：%s", outcome.reports.manifest)
+    if outcome.reports.pending_supplements is not None:
+        logger.info("待补成本运费：%s", outcome.reports.pending_supplements)
     return 0
 
 

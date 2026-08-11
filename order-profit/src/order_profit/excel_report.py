@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 import pandas as pd
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.utils import get_column_letter
 
 from order_profit.config import RunConfig
@@ -25,6 +26,9 @@ HEADER_FONT = Font(color="FFFFFF", bold=True)
 SUBHEADER_FILL = PatternFill("solid", fgColor="EAF0F5")
 MONEY_FORMAT = '#,##0.00;[Red]-#,##0.00'
 PERCENT_FORMAT = '0.00%'
+INPUT_FILL = PatternFill("solid", fgColor="FFF2CC")
+INPUT_FONT = Font(name="Arial", color="0000FF")
+BODY_FONT = Font(name="Arial", color="000000")
 
 
 def _safe_excel_value(value: Any) -> Any:

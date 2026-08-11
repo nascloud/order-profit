@@ -121,9 +121,9 @@ def validate_reconciliation(
             f"强制勾稽失败：{details}",
             code="RECONCILIATION_FAILED",
         )
-    status = (
-        RunStatus.PROVISIONAL
-        if int(summary["成本运费缺失行数"]) > 0
-        else RunStatus.FINAL
+    has_incomplete_data = (
+        int(summary["成本运费缺失行数"]) > 0
+        or len(partitions.missing_merchant_code) > 0
     )
+    status = RunStatus.PROVISIONAL if has_incomplete_data else RunStatus.FINAL
     return ReconciliationResult(status=status, checks=checks)

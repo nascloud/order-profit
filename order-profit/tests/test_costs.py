@@ -107,6 +107,36 @@ def test_supplement_matches_full_source_and_respects_overwrite(tmp_path: Path) -
     assert with_overwrite.orders.data.iloc[0]["补充运费_分"] == 20
 
 
+def test_generated_missing_freight_can_override_blocking_source_value(
+    tmp_path: Path,
+) -> None:
+    orders = _loaded(
+        tmp_path,
+        "orders",
+        [_order(2, 运费_分=0)],
+    )
+    supplements = _loaded(
+        tmp_path,
+        "supplements",
+        [
+            _supplement(
+                9,
+                主订单编号="O2",
+                商品ID="P2",
+                商家编码="SKU2",
+                货品成本_分=None,
+                运费_分=1025,
+                缺失项目="运费",
+            )
+        ],
+    )
+
+    result = apply_supplements(orders, supplements, overwrite_existing=False)
+
+    assert result.orders.data.iloc[0]["补充运费_分"] == 1025
+    assert bool(result.audit.iloc[0]["运费已应用"])
+
+
 def test_inactive_supplement_matches_but_does_not_apply(tmp_path: Path) -> None:
     orders = _loaded(tmp_path, "orders", [_order(2)])
     supplements = _loaded(

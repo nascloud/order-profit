@@ -16,6 +16,7 @@ from order_profit.normalize import (
     money_to_cents,
     normalize_count,
     normalize_datetime,
+    normalize_merchant_code,
     normalize_quantity,
 )
 
@@ -246,8 +247,27 @@ def normalize_supplements(table: LoadedTable, config: RunConfig) -> LoadedTable:
     del config
     data = table.data.copy()
     keys = ["主订单编号", "商品ID", "商家编码"]
-    for key in keys:
+    for key in ("主订单编号", "商品ID"):
         _require_nonempty_key(data, column=key, role="人工补充表")
+    if "补充商家编码" not in data.columns:
+        data["补充商家编码"] = ""
+    data["商家编码"] = data["商家编码"].map(normalize_merchant_code)
+    data["补充商家编码"] = data["补充商家编码"].map(normalize_merchant_code)
+    if "明细序号" not in data.columns:
+        data["明细序号"] = None
+    detail_numbers: list[int | None] = []
+    for index, value in data["明细序号"].items():
+        if is_missing(value):
+            detail_numbers.append(None)
+            continue
+        number = normalize_count(value, location=_location(data, index, "明细序号"))
+        if number < 2:
+            raise InputContractError(
+                "人工补充表明细序号必须是原订单 Excel 数据行号（不小于 2）",
+                code="SUPPLEMENT_DETAIL_ROW_INVALID",
+            )
+        detail_numbers.append(number)
+    data["明细序号"] = pd.Series(detail_numbers, index=data.index, dtype=object)
     allowed = {"", "已确认", "已同步", "草稿", "作废"}
     data["补充状态"] = data["补充状态"].fillna("").map(lambda value: str(value).strip())
     invalid = sorted(set(data.loc[~data["补充状态"].isin(allowed), "补充状态"]))
@@ -258,20 +278,40 @@ def normalize_supplements(table: LoadedTable, config: RunConfig) -> LoadedTable:
         )
     _map_column(data, "货品成本", "货品成本_分", money_to_cents, allow_missing=True, nonnegative=True)
     _map_column(data, "运费", "运费_分", money_to_cents, allow_missing=True, nonnegative=True)
-    both_missing = data["货品成本_分"].isna() & data["运费_分"].isna()
-    if both_missing.any():
-        rows = data.loc[both_missing, "source_row_number"].astype(int).tolist()[:10]
+    both_money_missing = data["货品成本_分"].isna() & data["运费_分"].isna()
+    code_missing = data["补充商家编码"].eq("")
+    active = data["补充状态"].isin({"", "已确认", "已同步"})
+    invalid_empty = both_money_missing & code_missing & active
+    if invalid_empty.any():
+        rows = data.loc[invalid_empty, "source_row_number"].astype(int).tolist()[:10]
         raise InputContractError(
-            f"人工补充表成本和运费不能同时为空，源行：{rows}",
+            f"生效的人工补充行必须填写补充商家编码、成本或运费之一，源行：{rows}",
             code="SUPPLEMENT_VALUES_EMPTY",
         )
-    duplicated = data.duplicated(subset=keys, keep=False)
+    missing_original_code_without_detail = (
+        data["商家编码"].eq("")
+        & data["补充商家编码"].ne("")
+        & data["明细序号"].isna()
+    )
+    if missing_original_code_without_detail.any():
+        rows = data.loc[missing_original_code_without_detail, "source_row_number"].astype(int).tolist()[:10]
+        raise InputContractError(
+            f"补充缺失商家编码时必须提供明细序号，源行：{rows}",
+            code="SUPPLEMENT_CODE_DETAIL_REQUIRED",
+        )
+    data["_补充唯一键"] = [
+        (*tuple(str(row[key]) for key in keys), row["明细序号"])
+        for _, row in data.iterrows()
+    ]
+    duplicated = data["_补充唯一键"].duplicated(keep=False)
     if duplicated.any():
-        sample = data.loc[duplicated, keys].head(10).to_dict("records")
+        sample_columns = keys + ["明细序号"]
+        sample = data.loc[duplicated, sample_columns].head(10).to_dict("records")
         raise InputContractError(
             f"人工补充键重复：{sample}",
             code="SUPPLEMENT_KEY_DUPLICATE",
         )
+    data = data.drop(columns=["_补充唯一键"])
     return LoadedTable(data=data, metadata=table.metadata, issues=table.issues)
 
 

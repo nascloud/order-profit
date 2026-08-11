@@ -244,9 +244,15 @@ class DesktopApp:
             status, reports = payload
             assert isinstance(reports, PublishedReports)
             self.status.set(f"已生成：{status}")
+            supplement_line = (
+                f"\n\n待补成本运费：{reports.pending_supplements}\n"
+                "请填写黄色成本/运费单元格，将状态改为已确认，再选作人工补充表重新生成。"
+                if reports.pending_supplements is not None
+                else ""
+            )
             messagebox.showinfo(
                 "经营复盘已生成",
-                f"状态：{status}\n\nExcel：{reports.excel}\n\nHTML：{reports.html}",
+                f"状态：{status}\n\nExcel：{reports.excel}\n\nHTML：{reports.html}{supplement_line}",
             )
         else:
             message, detail = payload
