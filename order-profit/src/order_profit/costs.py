@@ -222,19 +222,78 @@ def _build_freight_lookup(freight: LoadedTable | None) -> dict[str, int]:
     }
 
 
-def _effective_waybill_counts(partitions: OrderPartitions) -> dict[str, int]:
-    frames = [partitions.normal, partitions.closed_shipped]
-    values = pd.concat(frames, ignore_index=True)["物流单号"].map(str)
-    values = values[values != ""]
-    return {str(key): int(value) for key, value in values.value_counts().items()}
+def _allocate_cents(total: int, rows: pd.DataFrame) -> dict[int, int]:
+    """按购买数量分摊整数分，尾差按余数和源行号确定性分配。"""
+
+    weighted: list[tuple[int, int, int]] = []
+    total_quantity = int(rows["购买数量_标准"].sum())
+    for _, row in rows.iterrows():
+        source_row = int(row["source_row_number"])
+        quantity = int(row["购买数量_标准"])
+        amount, remainder = divmod(total * quantity, total_quantity)
+        weighted.append((source_row, amount, remainder))
+    remainder_cents = total - sum(amount for _, amount, _ in weighted)
+    priority = sorted(weighted, key=lambda item: (-item[2], item[0]))
+    extra_rows = {source_row for source_row, _, _ in priority[:remainder_cents]}
+    return {
+        source_row: amount + (1 if source_row in extra_rows else 0)
+        for source_row, amount, _ in weighted
+    }
+
+
+def _build_freight_plan(
+    partitions: OrderPartitions,
+    freight_lookup: dict[str, int],
+) -> dict[int, tuple[int | None, str, bool]]:
+    """为每条有效明细生成实际运费取值、来源和阻断状态。"""
+
+    normal = partitions.normal.copy()
+    normal["_订单类型"] = "正常订单"
+    closed = partitions.closed_shipped.copy()
+    closed["_订单类型"] = "关闭已发货"
+    rows = pd.concat([normal, closed], ignore_index=True)
+    plan: dict[int, tuple[int | None, str, bool]] = {}
+    if rows.empty:
+        return plan
+
+    rows["_运单号"] = rows["物流单号"].map(lambda value: str(value or ""))
+    for waybill, group in rows[rows["_运单号"] != ""].groupby("_运单号", sort=False):
+        actual = freight_lookup.get(str(waybill))
+        if actual is None:
+            continue
+        source_rows = group["source_row_number"].astype(int).tolist()
+        if len(group) == 1:
+            plan[source_rows[0]] = (actual, "运费表实际运费", False)
+            continue
+
+        normal_rows = group[group["_订单类型"] == "正常订单"]
+        recipients = normal_rows if not normal_rows.empty else group
+        allocations = _allocate_cents(actual, recipients)
+        shared_orders = group["主订单编号"].map(str).nunique() > 1
+        allocated_source = (
+            "跨主订单共享运单按数量分摊"
+            if shared_orders
+            else "同主订单合并发货运费分摊"
+        )
+        closed_source = (
+            "跨主订单共享运单关闭明细不分摊"
+            if shared_orders
+            else "同主订单合并发货关闭明细不分摊"
+        )
+        for _, row in group.iterrows():
+            source_row = int(row["source_row_number"])
+            if source_row in allocations:
+                plan[source_row] = (allocations[source_row], allocated_source, False)
+            else:
+                plan[source_row] = (0, closed_source, False)
+    return plan
 
 
 def _resolve_row(
     row: pd.Series,
     *,
     cost_lookup: dict[str, tuple[int, int]],
-    freight_lookup: dict[str, int],
-    waybill_counts: dict[str, int],
+    freight_plan: dict[int, tuple[int | None, str, bool]],
 ) -> tuple[dict[str, object], list[Issue]]:
     issues: list[Issue] = []
     code = str(row["商家编码"])
@@ -273,28 +332,31 @@ def _resolve_row(
     supplement_freight = row.get("补充运费_分")
     existing_freight = row.get("运费_分")
     waybill = str(row.get("物流单号") or "")
-    actual_freight = freight_lookup.get(waybill) if waybill else None
+    planned_freight, planned_source, planned_blocked = freight_plan.get(
+        int(row["source_row_number"]),
+        (None, "", False),
+    )
     freight_blocked = False
     if not is_missing(supplement_freight):
         resolved_freight: int | None = int(supplement_freight)
         freight_source = "人工补充"
-    elif actual_freight is not None and waybill_counts.get(waybill, 0) > 1:
+    elif planned_blocked:
         resolved_freight = None
-        freight_source = "共享运单未核算"
+        freight_source = planned_source
         freight_blocked = True
         issues.append(
             Issue(
-                code="FREIGHT_SHARED_WAYBILL",
+                code="FREIGHT_SHARED_ACROSS_ORDERS",
                 severity=Severity.WARNING,
-                message="实际运单被多条有效明细共享，运费保持未核算且禁止回退",
+                message="实际运单被不同主订单共享，运费保持未核算且禁止回退",
                 location=_location(row, "物流单号"),
                 raw_value=waybill,
-                suggestion="通过人工补充提供明细总运费，或确认业务分摊规则",
+                suggestion="核对运单归属，或通过人工补充提供各明细总运费",
             )
         )
-    elif actual_freight is not None:
-        resolved_freight = actual_freight
-        freight_source = "运费表实际运费"
+    elif planned_source:
+        resolved_freight = int(planned_freight)
+        freight_source = planned_source
     elif not is_missing(existing_freight):
         resolved_freight = int(existing_freight)
         freight_source = "订单表已有"
@@ -337,8 +399,7 @@ def _resolve_frame(
     frame: pd.DataFrame,
     *,
     cost_lookup: dict[str, tuple[int, int]],
-    freight_lookup: dict[str, int],
-    waybill_counts: dict[str, int],
+    freight_plan: dict[int, tuple[int | None, str, bool]],
 ) -> tuple[pd.DataFrame, list[Issue]]:
     result = frame.copy()
     records: list[dict[str, object]] = []
@@ -347,8 +408,7 @@ def _resolve_frame(
         resolved, row_issues = _resolve_row(
             row,
             cost_lookup=cost_lookup,
-            freight_lookup=freight_lookup,
-            waybill_counts=waybill_counts,
+            freight_plan=freight_plan,
         )
         records.append(resolved)
         issues.extend(row_issues)
@@ -380,18 +440,16 @@ def resolve_costs_and_freight(
 
     cost_lookup = _build_cost_lookup(costs)
     freight_lookup = _build_freight_lookup(freight)
-    waybill_counts = _effective_waybill_counts(partitions)
+    freight_plan = _build_freight_plan(partitions, freight_lookup)
     normal, normal_issues = _resolve_frame(
         partitions.normal,
         cost_lookup=cost_lookup,
-        freight_lookup=freight_lookup,
-        waybill_counts=waybill_counts,
+        freight_plan=freight_plan,
     )
     closed, closed_issues = _resolve_frame(
         partitions.closed_shipped,
         cost_lookup=cost_lookup,
-        freight_lookup=freight_lookup,
-        waybill_counts=waybill_counts,
+        freight_plan=freight_plan,
     )
 
     audit = supplement_audit.copy()

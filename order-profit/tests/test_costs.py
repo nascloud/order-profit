@@ -214,11 +214,101 @@ def test_cost_and_freight_priority(tmp_path: Path) -> None:
     assert (third["核算运费_分"], third["运费来源"]) == (45, "成本编码表标准运费")
 
 
-def test_shared_actual_waybill_blocks_all_fallbacks(tmp_path: Path) -> None:
+def test_same_order_waybill_assigns_all_freight_to_normal_rows(tmp_path: Path) -> None:
     normal = pd.DataFrame(
         [
-            _order(2, 商家编码="A", 物流单号="SHARED", 运费_分=10),
-            _order(3, 商家编码="B", 物流单号="SHARED", 运费_分=20),
+            _order(
+                2,
+                主订单编号="SAME",
+                商家编码="A",
+                物流单号="SHARED",
+                购买数量_标准=1,
+            )
+        ]
+    )
+    closed = pd.DataFrame(
+        [
+            _order(
+                3,
+                主订单编号="SAME",
+                商家编码="B",
+                物流单号="SHARED",
+                购买数量_标准=3,
+            )
+        ]
+    )
+    costs = _loaded(
+        tmp_path,
+        "costs",
+        [
+            {"编码": "A", "成本_分": 100, "运费_分": 30},
+            {"编码": "B", "成本_分": 200, "运费_分": 40},
+        ],
+    )
+    freight = _loaded(
+        tmp_path,
+        "freight",
+        [{"运单号": "SHARED", "总运费_分": 1201}],
+    )
+
+    result = resolve_costs_and_freight(
+        _partitions(normal, closed),
+        costs=costs,
+        freight=freight,
+        supplement_audit=pd.DataFrame(),
+    )
+
+    assert result.normal.iloc[0]["核算运费_分"] == 1201
+    assert result.normal.iloc[0]["运费来源"] == "同主订单合并发货运费分摊"
+    assert result.closed_shipped.iloc[0]["核算运费_分"] == 0
+    assert result.closed_shipped.iloc[0]["运费来源"] == "同主订单合并发货关闭明细不分摊"
+    assert not result.issues
+
+
+def test_same_order_multiple_normal_rows_split_by_quantity(tmp_path: Path) -> None:
+    normal = pd.DataFrame(
+        [
+            _order(2, 主订单编号="SAME", 商家编码="A", 物流单号="SHARED", 购买数量_标准=1),
+            _order(3, 主订单编号="SAME", 商家编码="B", 物流单号="SHARED", 购买数量_标准=3),
+        ]
+    )
+    costs = _loaded(
+        tmp_path,
+        "costs",
+        [
+            {"编码": "A", "成本_分": 100, "运费_分": 30},
+            {"编码": "B", "成本_分": 200, "运费_分": 40},
+        ],
+    )
+    freight = _loaded(tmp_path, "freight", [{"运单号": "SHARED", "总运费_分": 1201}])
+
+    result = resolve_costs_and_freight(
+        _partitions(normal), costs=costs, freight=freight, supplement_audit=pd.DataFrame()
+    )
+
+    assert result.normal["核算运费_分"].tolist() == [300, 901]
+    assert int(result.normal["核算运费_分"].sum()) == 1201
+
+
+def test_cross_order_shared_waybill_splits_by_quantity(tmp_path: Path) -> None:
+    normal = pd.DataFrame(
+        [
+            _order(
+                2,
+                主订单编号="ORDER-A",
+                商家编码="A",
+                物流单号="SHARED",
+                购买数量_标准=1,
+                运费_分=10,
+            ),
+            _order(
+                3,
+                主订单编号="ORDER-B",
+                商家编码="B",
+                物流单号="SHARED",
+                购买数量_标准=3,
+                运费_分=20,
+            ),
         ]
     )
     costs = _loaded(
@@ -242,10 +332,11 @@ def test_shared_actual_waybill_blocks_all_fallbacks(tmp_path: Path) -> None:
         supplement_audit=pd.DataFrame(),
     )
 
-    assert result.normal["核算运费_分"].isna().all()
-    assert set(result.normal["运费来源"]) == {"共享运单未核算"}
-    assert result.normal["运费阻断回退"].all()
-    assert [issue.code for issue in result.issues].count("FREIGHT_SHARED_WAYBILL") == 2
+    assert result.normal["核算运费_分"].tolist() == [13, 37]
+    assert set(result.normal["运费来源"]) == {"跨主订单共享运单按数量分摊"}
+    assert not result.normal["运费阻断回退"].any()
+    assert not result.issues
+    assert int(result.normal["核算运费_分"].sum()) == 50
 
 
 def test_price_difference_has_known_zero_cost_and_freight_without_actual_match(
