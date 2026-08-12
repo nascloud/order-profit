@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Final
@@ -19,6 +20,9 @@ NORMAL_STATUSES: Final[frozenset[str]] = frozenset(
 )
 CLOSED_STATUS: Final[str] = "交易关闭"
 PRICE_DIFFERENCE_TITLE: Final[str] = "补差价专用"
+BRUSH_ORDER_MARKER: Final[re.Pattern[str]] = re.compile(
+    r"(?<![a-z0-9])[ds](?![a-z0-9])", re.IGNORECASE
+)
 
 
 def is_price_difference(row: pd.Series) -> bool:
@@ -100,13 +104,13 @@ def _cleaning_reasons(row: pd.Series) -> tuple[str, ...]:
     status = _text(row.get("订单状态"))
     logistics = _text(row.get("物流单号"))
     note = _text(row.get("商家备注"))
-    note_casefolded = note.casefold()
+    brush_markers = "".join(BRUSH_ORDER_MARKER.findall(note)).casefold()
 
     if status == CLOSED_STATUS and not logistics:
         reasons.append(CleaningReason.CLOSED_WITHOUT_LOGISTICS.value)
-    if "d" in note_casefolded:
+    if "d" in brush_markers:
         reasons.append(CleaningReason.NOTE_CONTAINS_D.value)
-    if "s" in note_casefolded:
+    if "s" in brush_markers:
         reasons.append(CleaningReason.NOTE_CONTAINS_S.value)
     return tuple(reasons)
 

@@ -84,7 +84,7 @@ def test_cleaning_collects_all_matching_reasons(tmp_path: Path) -> None:
                 2,
                 订单状态="交易关闭",
                 物流单号="",
-                商家备注="DS",
+                商家备注="D S",
                 买家应付货款="19.99",
                 买家应付货款_分=1999,
             )
@@ -101,7 +101,7 @@ def test_cleaning_collects_all_matching_reasons(tmp_path: Path) -> None:
     )
 
 
-def test_cleaning_is_case_insensitive_contains_match_and_never_deletes_by_amount(
+def test_cleaning_matches_markers_but_not_waybills_and_never_deletes_by_amount(
     tmp_path: Path,
 ) -> None:
     table = _table(
@@ -110,13 +110,15 @@ def test_cleaning_is_case_insensitive_contains_match_and_never_deletes_by_amount
             _row(2, 商家备注="s 张XY", 买家应付货款_分=2000),
             _row(3, 商家备注="补单d", 买家应付货款="0.01", 买家应付货款_分=1),
             _row(4, 商家备注="", 买家应付货款="0.01", 买家应付货款_分=1),
+            _row(5, 商家备注="德邦DPK1234567890"),
+            _row(6, 商家备注="顺丰SF1234567890"),
+            _row(7, 商家备注="DS"),
         ],
     )
 
     retained, deleted = apply_cleaning_rules(table)
 
-    assert len(retained) == 1
-    assert retained.iloc[0]["source_row_number"] == 4
+    assert retained["source_row_number"].tolist() == [4, 5, 6, 7]
     assert deleted.iloc[0]["cleaning_reasons"] == (CleaningReason.NOTE_CONTAINS_S.value,)
     assert deleted.iloc[1]["cleaning_reasons"] == (CleaningReason.NOTE_CONTAINS_D.value,)
 
