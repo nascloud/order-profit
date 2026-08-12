@@ -150,7 +150,7 @@ def test_period_is_half_open_and_partitions_are_mutually_exclusive(tmp_path: Pat
             订单付款时间_标准=datetime(2026, 8, 7, 23, 59, 59, 999999, tzinfo=TZ),
             订单状态="卖家已发货，等待买家确认",
         ),
-        _row(9, 订单状态="买家已付款，等待卖家发货", 物流单号=""),
+        _row(9, 订单状态="买家已付款,等待卖家发货", 物流单号=""),
         _row(4, 订单付款时间_标准=datetime(2026, 8, 8, tzinfo=TZ)),
         _row(5, 订单状态="交易关闭", 物流单号="W5"),
         _row(6, 商家编码=""),

@@ -96,6 +96,9 @@ class RunConfig:
     a_profit_share: Decimal = field(default=DEFAULT_A_PROFIT_SHARE, init=False)
 
     def __post_init__(self) -> None:
+        output = self.output_dir.resolve()
+        if any(path.resolve().parent == output for path in self.input_paths().values()):
+            object.__setattr__(self, "output_dir", self.output_dir / "核算结果")
         if self.start_date > self.end_date:
             raise ConfigurationError(
                 "开始日期不能晚于结束日期",

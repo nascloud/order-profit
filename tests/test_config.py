@@ -24,6 +24,21 @@ def test_run_config_exposes_platform_rates(tmp_path: Path) -> None:
     assert config.to_dict()["platform"] == "tmall"
 
 
+def test_output_uses_subdirectory_when_input_and_output_share_directory(
+    tmp_path: Path,
+) -> None:
+    config = RunConfig(
+        orders=tmp_path / "orders.xlsx",
+        costs=tmp_path / "costs.xlsx",
+        start_date=date(2026, 8, 1),
+        end_date=date(2026, 8, 7),
+        platform=Platform.TMALL,
+        output_dir=tmp_path,
+    )
+
+    assert config.output_dir == tmp_path / "核算结果"
+
+
 def test_run_config_rejects_reversed_dates(tmp_path: Path) -> None:
     with pytest.raises(ConfigurationError, match="开始日期"):
         RunConfig(
