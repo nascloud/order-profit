@@ -29,6 +29,16 @@ pytest
 
 Windows 桌面界面使用 Python 标准库 Tkinter，无额外 Web 服务。
 
+## Windows 打包与版本
+
+版本号只在 `src/order_profit/__init__.py` 的 `__version__` 中维护。发布新版本时先修改该值，再在 PowerShell 中运行：
+
+```powershell
+.\scripts\build-windows.ps1 -Clean
+```
+
+脚本使用 `uv` 安装打包依赖，并生成 `dist/order-profit-v版本号.exe`。`build/`、`dist/` 和 PyInstaller 临时配置均不提交 Git。
+
 ## 桌面启动器
 
 安装项目后运行：

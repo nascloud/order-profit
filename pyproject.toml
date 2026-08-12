@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "order-profit"
-version = "0.1.0"
+dynamic = ["version"]
 description = "可追溯的电商订单利润核算与报表程序"
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
@@ -16,6 +16,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+build = ["pyinstaller>=6.22,<7"]
 dev = [
   "pytest>=8.3,<10",
   "pytest-cov>=6,<8",
@@ -29,6 +30,9 @@ order-profit-gui = "order_profit.desktop:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/order_profit"]
+
+[tool.hatch.version]
+path = "src/order_profit/__init__.py"
 
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers"
