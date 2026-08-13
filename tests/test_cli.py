@@ -18,7 +18,7 @@ def test_version_option(capsys: pytest.CaptureFixture[str]) -> None:
         main(["--version"])
 
     assert raised.value.code == 0
-    assert "0.1.0" in capsys.readouterr().out
+    assert "0.2.0" in capsys.readouterr().out
 
 
 def test_no_command_prints_help(capsys: pytest.CaptureFixture[str]) -> None:
