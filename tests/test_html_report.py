@@ -78,7 +78,13 @@ def test_html_escapes_business_text_and_embeds_safe_json(tmp_path: Path) -> None
         "仅推广链接": 0,
     }
     result = SimpleNamespace(
-        analysis=SimpleNamespace(summary=summary, links=links, daily=pd.DataFrame(), products=pd.DataFrame()),
+        analysis=SimpleNamespace(
+            summary=summary,
+            links=links,
+            daily=pd.DataFrame(),
+            products=pd.DataFrame(),
+            sku=pd.DataFrame([{"商家编码": "SKU-1", "产品名称": "产品一", "购买数量": 1, "销售额_分": 10000}]),
+        ),
         reconciliation=SimpleNamespace(status=RunStatus.FINAL),
     )
     path = tmp_path / "report.html"
@@ -91,7 +97,31 @@ def test_html_escapes_business_text_and_embeds_safe_json(tmp_path: Path) -> None
     assert "esc(r[c[1]]??'--')" in page
     assert "const DATA=" in page
     assert "搜索商品ID或标题" in page
+    assert 'id="rankings"' in page
+    assert "产品销售榜" in page
+    assert "产品退款榜" in page
+    assert "产品利润榜" in page
+    assert "热销产品榜" in page
+    assert "DATA.sku" in page
+    assert "r['商家编码']||'无商家编码'" in page
+    assert "销售占比 ${pct(paid?Number(r['销售额_分']||0)/paid:null)}" in page
+    assert "r['经营贡献利润率状态']==='已核算'" in page
+    assert "链接利润榜" in page
+    assert "链接销售榜" in page
+    assert "链接退款榜" in page
+    assert "链接花费榜" in page
+    assert "链接投产榜" in page
+    assert "链接亏损预警" in page
+    assert "r['核算状态']==='已核算'" in page
+    assert "roiSpendFloor=Math.max(10000" in page
+    assert "Number(r['推广花费_分']||0)>=roiSpendFloor" in page
     assert ".table-wrap{overflow:auto" in page
+    assert "@media(max-width:700px)" in page
+    assert "@page{size:A4 landscape" in page
+    assert ".view[hidden]{display:block!important}" in page
+    assert ".equation-scroll,.table-wrap{overflow:visible;max-height:none" in page
+    assert ".equation,.profit-equation{width:100%;min-width:0;flex-direction:row!important}" in page
+    assert "table{min-width:0" in page
     assert "含推广净利润" not in page
     assert "全部订单销售链" in page
     assert "已核算利润链" in page
