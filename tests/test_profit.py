@@ -83,6 +83,37 @@ def test_missing_cost_keeps_profit_empty_but_still_calculates_fees(tmp_path: Pat
     assert row["核算状态"] == "成本或运费缺失"
 
 
+def test_brush_order_amount_becomes_brush_cost_and_not_profit(tmp_path: Path) -> None:
+    normal = pd.DataFrame(
+        [
+            {
+                "source_sheet": "export",
+                "source_row_number": 2,
+                "主订单编号": "O1",
+                "商品ID": "P1",
+                "退款状态": "无退款",
+                "退款金额_分": None,
+                "买家应付货款_分": 10000,
+                "核算成本_分": 3000,
+                "核算运费_分": 500,
+                "cleaning_reasons": ("商家备注包含字母D/d",),
+            }
+        ]
+    )
+    costs = CostResolutionResult(
+        normal=normal,
+        closed_shipped=normal.iloc[0:0].copy(),
+        supplement_audit=pd.DataFrame(),
+    )
+
+    row = calculate_order_profit(costs, _config(tmp_path)).normal.iloc[0]
+
+    assert row["平台扣点_分"] == 600
+    assert row["综合税赋_分"] == 230
+    assert row["刷单成本_分"] == 10000
+    assert row["正常订单利润_分"] == -830
+
+
 def test_closed_loss_is_positive_and_profit_is_negative(tmp_path: Path) -> None:
     closed = pd.DataFrame(
         [{"核算成本_分": 3000, "核算运费_分": 500}]

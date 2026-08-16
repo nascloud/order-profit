@@ -21,11 +21,12 @@ if (-not (Test-Path ".venv\Scripts\python.exe")) {
 uv pip install --python .venv\Scripts\python.exe -e ".[build]"
 
 $version = & .venv\Scripts\python.exe -c "import order_profit; print(order_profit.__version__)"
-$name = "order-profit-v$version"
+$name = "订单利润核算-v$version"
 $arguments = @(
     "--noconfirm"
     "--onefile"
     "--windowed"
+    "--icon", "assets\app-icon.ico"
     "--name", $name
     "--paths", "src"
     "src\order_profit\desktop.py"

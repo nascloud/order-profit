@@ -35,6 +35,10 @@ def _rate_amount(base_cents: int, rate: Decimal) -> int:
     return int(amount)
 
 
+def _is_brush_order(row: pd.Series) -> bool:
+    return "商家备注包含字母" in str(row.get("cleaning_reasons", ""))
+
+
 def _refund_exceeds_receipt_issue(row: pd.Series, receipt: int, refund: int) -> Issue:
     return Issue(
         code="ORDER_REFUND_EXCEEDS_RECEIPT",
@@ -55,6 +59,7 @@ def calculate_order_profit(costs: CostResolutionResult, config: RunConfig) -> Pr
     fee_bases: list[int] = []
     platform_fees: list[int] = []
     taxes: list[int] = []
+    brush_costs: list[int] = []
     profits: list[int | None] = []
     margins: list[Decimal] = []
     statuses: list[str] = []
@@ -67,11 +72,14 @@ def calculate_order_profit(costs: CostResolutionResult, config: RunConfig) -> Pr
         base = max(receipt - refund, 0)
         platform_fee = _rate_amount(base, config.platform_fee_rate)
         tax = _rate_amount(base, config.tax_rate)
+        brush_cost = receipt if _is_brush_order(row) else 0
         cost = row.get("核算成本_分")
         freight = row.get("核算运费_分")
         complete = not is_missing(cost) and not is_missing(freight)
         if complete:
-            profit = receipt - refund - int(cost) - int(freight) - platform_fee - tax
+            product_cost = 0 if brush_cost else int(cost)
+            freight_cost = 0 if brush_cost else int(freight)
+            profit = receipt - refund - product_cost - freight_cost - brush_cost - platform_fee - tax
             margin = Decimal(profit) / Decimal(base) if base else Decimal("0")
             status = "已核算"
         else:
@@ -82,6 +90,7 @@ def calculate_order_profit(costs: CostResolutionResult, config: RunConfig) -> Pr
         fee_bases.append(base)
         platform_fees.append(platform_fee)
         taxes.append(tax)
+        brush_costs.append(brush_cost)
         profits.append(profit)
         margins.append(margin)
         zero_denominator.append(base == 0)
@@ -94,6 +103,7 @@ def calculate_order_profit(costs: CostResolutionResult, config: RunConfig) -> Pr
     normal["费用计费基数_分"] = fee_bases
     normal["平台扣点_分"] = platform_fees
     normal["综合税赋_分"] = taxes
+    normal["刷单成本_分"] = brush_costs
     normal["正常订单利润_分"] = pd.Series(profits, index=normal.index, dtype=object)
     normal["利润率"] = margins
     normal["零分母"] = zero_denominator

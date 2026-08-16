@@ -93,8 +93,8 @@ def test_cleaning_collects_all_matching_reasons(tmp_path: Path) -> None:
 
     retained, deleted = apply_cleaning_rules(table)
 
-    assert retained.empty
-    assert deleted.iloc[0]["cleaning_reasons"] == (
+    assert deleted.empty
+    assert retained.iloc[0]["cleaning_reasons"] == (
         CleaningReason.CLOSED_WITHOUT_LOGISTICS.value,
         CleaningReason.NOTE_CONTAINS_D.value,
         CleaningReason.NOTE_CONTAINS_S.value,
@@ -118,20 +118,20 @@ def test_cleaning_matches_markers_but_not_waybills_and_never_deletes_by_amount(
 
     retained, deleted = apply_cleaning_rules(table)
 
-    assert retained["source_row_number"].tolist() == [4, 5, 6, 7]
-    assert deleted.iloc[0]["cleaning_reasons"] == (CleaningReason.NOTE_CONTAINS_S.value,)
-    assert deleted.iloc[1]["cleaning_reasons"] == (CleaningReason.NOTE_CONTAINS_D.value,)
+    assert deleted.empty
+    assert retained["source_row_number"].tolist() == [2, 3, 4, 5, 6, 7]
+    assert retained.iloc[0]["cleaning_reasons"] == (CleaningReason.NOTE_CONTAINS_S.value,)
+    assert retained.iloc[1]["cleaning_reasons"] == (CleaningReason.NOTE_CONTAINS_D.value,)
 
 
-def test_deleted_row_may_have_missing_payment_time(tmp_path: Path) -> None:
+def test_brush_order_is_not_deleted_and_requires_payment_time(tmp_path: Path) -> None:
     table = _table(
         tmp_path,
         [_row(2, 商家备注="D", 订单付款时间=None, 订单付款时间_标准=None)],
     )
 
-    result = partition_orders(table, _config(tmp_path))
-
-    assert result.counts()[OrderPartition.DELETED_BY_RULE.value] == 1
+    with pytest.raises(NormalizationError, match="付款时间不能为空"):
+        partition_orders(table, _config(tmp_path))
 
 
 def test_retained_row_requires_payment_time(tmp_path: Path) -> None:
@@ -163,9 +163,9 @@ def test_period_is_half_open_and_partitions_are_mutually_exclusive(tmp_path: Pat
     result = partition_orders(_table(tmp_path, rows), _config(tmp_path))
 
     assert result.counts() == {
-        "DELETED_BY_RULE": 1,
+        "DELETED_BY_RULE": 0,
         "OUT_OF_PERIOD": 1,
-        "NORMAL_CODED": 3,
+        "NORMAL_CODED": 4,
         "CLOSED_SHIPPED_CODED": 1,
         "CLOSED_UNSHIPPED_PAID": 0,
         "CLOSED_UNPAID": 0,

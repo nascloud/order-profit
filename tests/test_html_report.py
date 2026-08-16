@@ -34,11 +34,14 @@ def test_html_escapes_business_text_and_embeds_safe_json(tmp_path: Path) -> None
                 "主订单数": 1,
                 "购买数量": 1,
                 "销售额_分": 10000,
+                "刷单金额_分": 10000,
+                "真实销售额_分": 0,
                 "销售贡献率": Decimal("1"),
                 "订单批次成功退款_分": 0,
                 "退款率": Decimal("0"),
                 "货品成本_分": 3000,
                 "运费_分": 500,
+                "刷单成本_分": 10000,
                 "平台扣点_分": 600,
                 "综合税赋_分": 230,
                 "关闭已发货损失_分": 0,
@@ -59,10 +62,13 @@ def test_html_escapes_business_text_and_embeds_safe_json(tmp_path: Path) -> None
         "订单批次成功退款金额_分": 0,
         "期间退款完结金额_分": 0,
         "净销售额_分": 10000,
+        "刷单金额_分": 10000,
+        "真实销售额_分": 0,
         "已核算销售额_分": 10000,
         "已核算订单批次成功退款_分": 0,
         "已核算货品成本_分": 3000,
         "已核算运费_分": 500,
+        "已核算刷单成本_分": 10000,
         "已核算平台扣点_分": 600,
         "已核算综合税赋_分": 230,
         "关闭已发货损失_分": 0,
@@ -125,12 +131,16 @@ def test_html_escapes_business_text_and_embeds_safe_json(tmp_path: Path) -> None
     assert "含推广净利润" not in page
     assert "全部订单销售链" in page
     assert "已核算利润链" in page
+    assert "刷单金额" in page
+    assert "真实销售额" in page
+    assert "term('真实销售额',realSales,'result'" in page
+    assert "term('刷单成本',S['已核算刷单成本_分'],'cost'" in page
     assert "全部订单批次成功退款" in page
     assert "销售额核算覆盖率 ${pct(S['销售额核算覆盖率'])}" in page
     assert 'id="profitEquation"' in page
     assert "profit-equation" in page
     assert "term('关闭已发货损失'" in page
-    assert "term('净销售额',S['净销售额_分'],'result'" in page
+    assert "刷单成本同金额计入利润" in page
     assert "占已核算销售额 ${share(accountedRefund,accounted)}" in page
     assert "占净销售额 ${share(S['已核算平台扣点_分'],accountedNet)}" in page
     assert "占已核算净销售额 ${pct(accountedNet?S['推广花费_分']/accountedNet:null)}" in page

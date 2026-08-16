@@ -121,9 +121,7 @@ def apply_cleaning_rules(table: LoadedTable) -> tuple[pd.DataFrame, pd.DataFrame
     data = table.data.copy()
     data.attrs.update(table.data.attrs)
     data["cleaning_reasons"] = data.apply(_cleaning_reasons, axis=1)
-    deleted_mask = data["cleaning_reasons"].map(
-        lambda reasons: any(reason != CleaningReason.CLOSED_WITHOUT_LOGISTICS.value for reason in reasons)
-    )
+    deleted_mask = pd.Series(False, index=data.index)
     deleted = data.loc[deleted_mask].copy()
     retained = data.loc[~deleted_mask].copy()
     deleted["partition"] = OrderPartition.DELETED_BY_RULE.value

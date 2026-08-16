@@ -13,6 +13,7 @@ P1～P12 已实现：
 - 人工补充、成本与实际/标准运费解析；
 - 有效退款、平台扣点、综合税赋、正常利润和关闭已发货损失；
 - 售后主订单级复核、推广每日/链接汇总、SKU/链接/店铺分析；
+- 链接 SABC 分级，默认按含推广经营贡献利润 50%/80% 阈值分为 S/A/B/C/待核算；
 - 强制勾稽与 `FAILED / PROVISIONAL / FINAL`；
 - Excel 报告、自包含 HTML 运营复盘、原子输出事务；
 - Tkinter 本地桌面启动器。
@@ -37,7 +38,7 @@ Windows 桌面界面使用 Python 标准库 Tkinter，无额外 Web 服务。
 .\scripts\build-windows.ps1 -Clean
 ```
 
-脚本使用 `uv` 安装打包依赖，并生成 `dist/order-profit-v版本号.exe`。`build/`、`dist/` 和 PyInstaller 临时配置均不提交 Git。
+脚本使用 `uv` 安装打包依赖，嵌入 `assets/app-icon.ico`，并生成 `dist/订单利润核算-v版本号.exe`。`build/`、`dist/` 和 PyInstaller 临时配置均不提交 Git。
 
 ## 桌面启动器
 
@@ -127,6 +128,7 @@ manifest.json
 - `--overwrite-existing`：同一人工补充记录再次导入时，允许新补充值覆盖既有补充值；不会覆盖成本编码表或运费表的可解析结果。
 - `--require-complete`：存在成本/运费缺失时返回非零且不发布正式报告。
 - `--timezone Asia/Shanghai`：配置业务时区。
+- `--sabc-config sabc.json`：可选；自定义 S/A 分级阈值，未指定时使用 50%/80%。
 
 ## 报告状态
 
@@ -166,4 +168,5 @@ order-profit/
 - 原始输入只读，所有排除、覆盖和计算保留审计字段。
 - Python `PipelineResult` 是 Excel 和 HTML 的共同事实来源。
 - 推广归因成交金额只用于投产分析，不重复计入订单销售额。
+- SABC 使用链接含推广经营贡献利润分级，不按销售额分级；详见 `docs/SABC分级规则说明.md`。
 - HTML 动作标签只作运营复盘提示，不自动修改推广计划。

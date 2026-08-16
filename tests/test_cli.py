@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 
 from order_profit.__main__ import main
+from order_profit import __version__
 from order_profit.inputs import ORDER_COLUMNS
 from order_profit.excel_report import _summary_frame
 
@@ -18,7 +19,7 @@ def test_version_option(capsys: pytest.CaptureFixture[str]) -> None:
         main(["--version"])
 
     assert raised.value.code == 0
-    assert "0.2.0" in capsys.readouterr().out
+    assert __version__ in capsys.readouterr().out
 
 
 def test_no_command_prints_help(capsys: pytest.CaptureFixture[str]) -> None:
@@ -38,9 +39,17 @@ def test_validate_inputs_writes_manifest(tmp_path: Path) -> None:
     orders = tmp_path / "orders.xlsx"
     output = tmp_path / "output"
     values = {column: [""] for column in sorted(ORDER_COLUMNS)}
-    values["主订单编号"] = ["001"]
-    values["商品ID"] = ["1001"]
-    values["商家备注"] = ["D"]
+    values.update({
+        "主订单编号": ["001"],
+        "商品ID": ["1001"],
+        "商品标题": ["补差价专用"],
+        "购买数量": [1],
+        "订单状态": ["交易成功"],
+        "买家应付货款": ["20.00"],
+        "退款状态": ["无退款"],
+        "订单付款时间": ["2026-08-01 00:00:00"],
+        "商家备注": ["D"],
+    })
     pd.DataFrame(values).to_excel(orders, sheet_name="export", index=False)
 
     result = main(
@@ -64,9 +73,13 @@ def test_validate_inputs_writes_manifest(tmp_path: Path) -> None:
     assert manifest["status"] == "FINAL"
     assert manifest["stage"] == "P1-P9_IN_MEMORY_RECONCILIATION"
     assert manifest["inputs"]["orders"]["rows"] == 1
-    assert manifest["order_partitions"]["DELETED_BY_RULE"] == 1
+    assert manifest["order_partitions"]["DELETED_BY_RULE"] == 0
+    assert manifest["order_partitions"]["NORMAL_CODED"] == 1
     assert manifest["cost_freight"]["missing_cost_rows"] == 0
-    assert manifest["summary"]["有效商品链接"] == 0
+    assert manifest["summary"]["刷单金额_分"] == 2000
+    assert manifest["summary"]["已核算刷单成本_分"] == 2000
+    assert manifest["summary"]["真实销售额_分"] == 0
+    assert manifest["summary"]["有效商品链接"] == 1
     assert all(check["passed"] for check in manifest["reconciliation"])
 
 
@@ -176,10 +189,17 @@ def test_run_writes_reports_for_complete_empty_result(tmp_path: Path) -> None:
     orders = tmp_path / "orders.xlsx"
     output = tmp_path / "reports"
     values = {column: [""] for column in sorted(ORDER_COLUMNS)}
-    values["主订单编号"] = ["001"]
-    values["商品ID"] = ["1001"]
-    values["商品标题"] = ["<script>alert(1)</script>"]
-    values["商家备注"] = ["D"]
+    values.update({
+        "主订单编号": ["001"],
+        "商品ID": ["1001"],
+        "商品标题": ["补差价专用"],
+        "购买数量": [1],
+        "订单状态": ["交易成功"],
+        "买家应付货款": ["20.00"],
+        "退款状态": ["无退款"],
+        "订单付款时间": ["2026-08-01 00:00:00"],
+        "商家备注": ["D"],
+    })
     pd.DataFrame(values).to_excel(orders, sheet_name="export", index=False)
 
     result = main(
@@ -204,6 +224,8 @@ def test_run_writes_reports_for_complete_empty_result(tmp_path: Path) -> None:
     assert (output / "manifest.json").exists()
     page = (output / "店铺经营复盘.html").read_text(encoding="utf-8")
     assert "店铺经营复盘" in page
+    assert "刷单金额" in page
+    assert "真实销售额" in page
     assert "FINAL" in page
 
 

@@ -95,9 +95,11 @@ def _profit() -> ProfitResult:
                 "核算运费_分": 500,
                 "平台扣点_分": 540,
                 "综合税赋_分": 207,
+                "刷单成本_分": 10000,
                 "正常订单利润_分": 4753,
                 "核算状态": "已核算",
                 "商家编码": "SKU1",
+                "cleaning_reasons": ("商家备注包含字母D/d",),
             }
         ]
     )
@@ -115,6 +117,7 @@ def _profit() -> ProfitResult:
                 "关闭已发货损失_分": 1200,
                 "核算状态": "已核算",
                 "商家编码": "SKU1",
+                "cleaning_reasons": (),
             }
         ]
     )
@@ -142,11 +145,19 @@ def test_link_union_summary_and_reconciliation(tmp_path: Path) -> None:
     assert analysis.summary["订单+推广链接"] == 1
     assert analysis.summary["仅推广链接"] == 1
     assert analysis.summary["已核算销售额_分"] == 10000
+    assert analysis.summary["刷单金额_分"] == 10000
+    assert analysis.summary["已核算刷单成本_分"] == 10000
+    assert analysis.summary["真实销售额_分"] == -1000
+    assert analysis.links.loc[analysis.links["商品ID"] == "P1", "刷单金额_分"].iloc[0] == 10000
+    assert analysis.links.loc[analysis.links["商品ID"] == "P1", "刷单成本_分"].iloc[0] == 10000
+    assert analysis.links.loc[analysis.links["商品ID"] == "P1", "真实销售额_分"].iloc[0] == -1000
+    assert analysis.daily.iloc[0]["刷单金额_分"] == 10000
+    assert analysis.daily.iloc[0]["真实销售额_分"] == -1000
     assert analysis.summary["含推广经营贡献利润_分"] == 2553
     assert analysis.summary["退款订单率"] == Decimal("0.5")
     assert analysis.summary["付款后关闭率"] == Decimal("0.5")
     assert analysis.summary["关闭已发货率"] == Decimal("0.5")
-    assert analysis.daily.iloc[0]["成本率"] == Decimal(3000) / Decimal(9000)
+    assert analysis.daily.iloc[0]["成本率"] == Decimal("0")
     assert analysis.daily.iloc[0]["平台费率"] == Decimal("0.06")
     assert analysis.daily.iloc[0]["税费率"] == Decimal("0.023")
     assert analysis.daily.iloc[0]["推广费率"] == Decimal(1000) / Decimal(9000)

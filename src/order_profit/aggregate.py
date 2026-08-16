@@ -48,6 +48,23 @@ def _sum(frame: pd.DataFrame, column: str) -> int:
     return int(frame[column].sum()) if not frame.empty and column in frame else 0
 
 
+def _brush_amount(frame: pd.DataFrame) -> int:
+    if frame.empty or "cleaning_reasons" not in frame:
+        return 0
+    mask = frame["cleaning_reasons"].map(lambda reasons: "商家备注包含字母" in str(reasons))
+    return _sum(frame[mask], "实收金额_分")
+
+
+def _non_brush(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty or "cleaning_reasons" not in frame:
+        return frame
+    return frame[~frame["cleaning_reasons"].map(lambda reasons: "商家备注包含字母" in str(reasons))]
+
+
+def _real_sales(sales: int, refunds: int, brush: int) -> int:
+    return sales - refunds - brush
+
+
 def _promotion_metrics(frame: pd.DataFrame) -> dict[str, object]:
     impressions = _sum(frame, "展现量_标准")
     clicks = _sum(frame, "点击量_标准")
@@ -149,9 +166,11 @@ def build_link_report(profit: ProfitResult, promotion: PromotionResult, config: 
         orders = paid[paid["商品ID"].map(str) == link_id].copy() if not paid.empty else pd.DataFrame()
         complete = orders[orders["核算状态"] == "已核算"] if not orders.empty else orders
         normal_complete = complete[complete["订单类型"] == "正常订单"] if not complete.empty else complete
+        normal_costed = _non_brush(normal_complete)
         closed_complete = complete[complete["订单类型"] == "付款后关闭已发货"] if not complete.empty else complete
         p = promo.get(link_id, {})
         sales, refunds = _sum(orders, "实收金额_分"), _sum(orders, "有效退款_分")
+        brush = _brush_amount(orders)
         accounted_sales = _sum(complete, "实收金额_分")
         accounted_refunds = _sum(complete, "有效退款_分")
         accounted_net = accounted_sales - accounted_refunds
@@ -181,11 +200,14 @@ def build_link_report(profit: ProfitResult, promotion: PromotionResult, config: 
             "主订单数": int(orders["主订单编号"].nunique()) if not orders.empty else 0,
             "购买数量": _sum(orders, "购买数量_标准"),
             "销售额_分": sales,
+            "刷单金额_分": brush,
+            "真实销售额_分": _real_sales(sales, refunds, brush),
             "已核算销售额_分": accounted_sales,
             "订单批次成功退款_分": refunds,
             "已核算订单批次成功退款_分": accounted_refunds,
-            "货品成本_分": _sum(normal_complete, "核算成本_分"),
-            "运费_分": _sum(normal_complete, "核算运费_分"),
+            "货品成本_分": _sum(normal_costed, "核算成本_分"),
+            "运费_分": _sum(normal_costed, "核算运费_分"),
+            "刷单成本_分": _sum(normal_complete, "刷单成本_分"),
             "平台扣点_分": _sum(complete, "平台扣点_分"),
             "综合税赋_分": _sum(complete, "综合税赋_分"),
             "关闭已发货损失_分": _sum(closed_complete, "关闭已发货损失_分"),
@@ -263,6 +285,7 @@ def build_product_report(profit: ProfitResult, promotion: PromotionResult, links
         group = paid[paid["产品名称"] == name] if not paid.empty else pd.DataFrame()
         complete = group[group["核算状态"] == "已核算"] if not group.empty else group
         normal = complete[complete["订单类型"] == "正常订单"] if not complete.empty else complete
+        normal_costed = _non_brush(normal)
         closed = complete[complete["订单类型"] == "付款后关闭已发货"] if not complete.empty else complete
         p = promo.get(name, {})
         spend = int(p.get("推广花费_分", 0))
@@ -272,6 +295,7 @@ def build_product_report(profit: ProfitResult, promotion: PromotionResult, links
         incomplete = int((group["核算状态"] != "已核算").sum()) if not group.empty else 0
         sales = _sum(group, "实收金额_分")
         refunds = _sum(group, "有效退款_分")
+        brush = _brush_amount(group)
         accounted_sales = _sum(complete, "实收金额_分")
         accounted_refunds = _sum(complete, "有效退款_分")
         net_sales = sales - refunds
@@ -279,9 +303,10 @@ def build_product_report(profit: ProfitResult, promotion: PromotionResult, links
             "产品名称": name, "SKU数": int(group["商家编码"].replace("", pd.NA).nunique()) if not group.empty else 0,
             "商品链接数": len(product_links), "已付款主订单数": int(group["主订单编号"].nunique()) if not group.empty else 0,
             "购买数量": _sum(group, "购买数量_标准"), "销售额_分": sales, "净销售额_分": net_sales,
+            "刷单金额_分": brush, "真实销售额_分": _real_sales(sales, refunds, brush),
             "已核算销售额_分": accounted_sales, "已核算净销售额_分": accounted_sales - accounted_refunds,
-            "订单批次成功退款_分": refunds, "货品成本_分": _sum(normal, "核算成本_分"), "运费_分": _sum(normal, "核算运费_分"),
-            "平台扣点_分": _sum(complete, "平台扣点_分"), "综合税赋_分": _sum(complete, "综合税赋_分"), "关闭已发货损失_分": _sum(closed, "关闭已发货损失_分"),
+            "订单批次成功退款_分": refunds, "货品成本_分": _sum(normal_costed, "核算成本_分"), "运费_分": _sum(normal_costed, "核算运费_分"),
+            "刷单成本_分": _sum(normal, "刷单成本_分"), "平台扣点_分": _sum(complete, "平台扣点_分"), "综合税赋_分": _sum(complete, "综合税赋_分"), "关闭已发货损失_分": _sum(closed, "关闭已发货损失_分"),
             "推广花费_分": spend, "推广归因成交金额_分": int(p.get("推广归因成交金额_分", 0)), "推广成交笔数": int(p.get("推广成交笔数", 0)),
             "推广前经营利润_分": _row_profit(complete), "含推广经营贡献利润_分": contribution,
             "经营贡献利润率状态": "待核算" if incomplete else ("已核算" if net_sales > 0 else "净销售额非正"),
@@ -325,10 +350,12 @@ def build_daily_report(profit: ProfitResult, promotion: PromotionResult, config:
         orders = paid[paid["订单付款时间_标准"].map(lambda value: value.date() == day)] if not paid.empty else pd.DataFrame()
         complete = orders[orders["核算状态"] == "已核算"] if not orders.empty else orders
         normal = complete[complete["订单类型"] == "正常订单"] if not complete.empty else complete
+        normal_costed = _non_brush(normal)
         closed = complete[complete["订单类型"] == "付款后关闭已发货"] if not complete.empty else complete
         p = promo.get(key, {})
         period_refund = _sum(after[after["退款完结时间_标准"].map(lambda value: value.date() == day)], "退款总额_分") if not after.empty else 0
         sales, refunds, spend = _sum(orders, "实收金额_分"), _sum(orders, "有效退款_分"), int(p.get("推广花费_分", 0))
+        brush = _brush_amount(orders)
         accounted_sales = _sum(complete, "实收金额_分")
         accounted_net = accounted_sales - _sum(complete, "有效退款_分")
         contribution = _row_profit(complete) - spend
@@ -336,12 +363,13 @@ def build_daily_report(profit: ProfitResult, promotion: PromotionResult, config:
         rows.append({
             "日期": key, "已付款主订单数": int(orders["主订单编号"].nunique()) if not orders.empty else 0, "购买数量": _sum(orders, "购买数量_标准"),
             "销售额_分": sales, "订单批次成功退款_分": refunds, "期间退款完结金额_分": period_refund, "净销售额_分": sales - refunds,
-            "货品成本_分": _sum(normal, "核算成本_分"), "运费_分": _sum(normal, "核算运费_分"), "平台扣点_分": _sum(complete, "平台扣点_分"), "综合税赋_分": _sum(complete, "综合税赋_分"),
+            "刷单金额_分": brush, "真实销售额_分": _real_sales(sales, refunds, brush),
+            "货品成本_分": _sum(normal_costed, "核算成本_分"), "运费_分": _sum(normal_costed, "核算运费_分"), "刷单成本_分": _sum(normal, "刷单成本_分"), "平台扣点_分": _sum(complete, "平台扣点_分"), "综合税赋_分": _sum(complete, "综合税赋_分"),
             "关闭已发货损失_分": _sum(closed, "关闭已发货损失_分"), "推广花费_分": spend, "推广归因成交金额_分": int(p.get("推广归因成交金额_分", 0)),
             "推广投产比": p.get("推广投产比"), "推广前经营利润_分": _row_profit(complete), "含推广经营贡献利润_分": contribution,
             "占期间销售比例": _optional_ratio(sales, total_sales), "累计销售额_分": cumulative_sales, "累计经营贡献利润_分": cumulative_profit,
-            "成本率": _optional_ratio(_sum(normal, "核算成本_分"), accounted_net),
-            "运费率": _optional_ratio(_sum(normal, "核算运费_分"), accounted_net),
+            "成本率": _optional_ratio(_sum(normal_costed, "核算成本_分"), accounted_net),
+            "运费率": _optional_ratio(_sum(normal_costed, "核算运费_分"), accounted_net),
             "平台费率": _optional_ratio(_sum(complete, "平台扣点_分"), accounted_net),
             "税费率": _optional_ratio(_sum(complete, "综合税赋_分"), accounted_net),
             "推广费率": _optional_ratio(spend, accounted_net),
@@ -364,10 +392,12 @@ def build_sku_report(profit: ProfitResult) -> pd.DataFrame:
 def build_summary(profit: ProfitResult, promotion: PromotionResult, links: pd.DataFrame, config: RunConfig) -> dict[str, object]:
     paid = _paid(profit); complete = paid[paid["核算状态"] == "已核算"] if not paid.empty else paid
     normal = complete[complete["订单类型"] == "正常订单"] if not complete.empty else complete
+    normal_costed = _non_brush(normal)
     closed = complete[complete["订单类型"] == "付款后关闭已发货"] if not complete.empty else complete
     metrics = _promotion_metrics(promotion.detail)
     sales, accounted = _sum(paid, "实收金额_分"), _sum(complete, "实收金额_分")
     refunds, spend = _sum(paid, "有效退款_分"), int(metrics["推广花费_分"])
+    brush = _brush_amount(paid)
     accounted_refunds = _sum(complete, "有效退款_分")
     accounted_net = accounted - accounted_refunds
     pre_profit = _row_profit(complete); contribution = pre_profit - spend
@@ -379,7 +409,8 @@ def build_summary(profit: ProfitResult, promotion: PromotionResult, links: pd.Da
     summary: dict[str, object] = {
         "平台": config.platform.value, "平台扣点率": config.platform_fee_rate, "综合税赋率": config.tax_rate,
         "已付款销售额_分": sales, "订单批次成功退款金额_分": refunds, "期间退款完结金额_分": _sum(profit.period_completed_refunds, "退款总额_分"), "净销售额_分": sales - refunds,
-        "已核算销售额_分": accounted, "已核算订单批次成功退款_分": accounted_refunds, "已核算货品成本_分": _sum(normal, "核算成本_分"), "已核算运费_分": _sum(normal, "核算运费_分"),
+        "刷单金额_分": brush, "真实销售额_分": _real_sales(sales, refunds, brush),
+        "已核算销售额_分": accounted, "已核算订单批次成功退款_分": accounted_refunds, "已核算货品成本_分": _sum(normal_costed, "核算成本_分"), "已核算运费_分": _sum(normal_costed, "核算运费_分"), "已核算刷单成本_分": _sum(normal, "刷单成本_分"),
         "已核算平台扣点_分": _sum(complete, "平台扣点_分"), "已核算综合税赋_分": _sum(complete, "综合税赋_分"), "关闭已发货损失_分": _sum(closed, "关闭已发货损失_分"),
         "推广花费_分": spend, "推广归因成交金额_分": int(metrics["推广归因成交金额_分"]), "推广投产比": metrics["推广投产比"], "推广前经营利润_分": pre_profit,
         "含推广经营贡献利润_分": contribution, "经营贡献利润率": _optional_ratio(contribution, accounted_net), "销售额核算覆盖率": _optional_ratio(accounted, sales),
