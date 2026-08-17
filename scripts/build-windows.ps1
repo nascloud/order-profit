@@ -41,3 +41,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "Built: $root\dist\$name.exe"
+
+& "$PSScriptRoot\build-cli-skill.ps1" -Clean:$Clean
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}

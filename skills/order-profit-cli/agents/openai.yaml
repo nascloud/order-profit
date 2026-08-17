@@ -1,0 +1,7 @@
+interface:
+  display_name: "订单利润核算 CLI"
+  short_description: "调用内置 CLI 核算天猫或淘宝订单利润并生成经营报表"
+  default_prompt: "Use $order-profit-cli to calculate a Tmall or Taobao order profit report from local files."
+
+policy:
+  allow_implicit_invocation: true
