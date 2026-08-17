@@ -72,13 +72,14 @@ def calculate_order_profit(costs: CostResolutionResult, config: RunConfig) -> Pr
         base = max(receipt - refund, 0)
         platform_fee = _rate_amount(base, config.platform_fee_rate)
         tax = _rate_amount(base, config.tax_rate)
-        brush_cost = receipt if _is_brush_order(row) else 0
+        is_brush = _is_brush_order(row)
+        brush_cost = receipt if is_brush else 0
         cost = row.get("核算成本_分")
         freight = row.get("核算运费_分")
-        complete = not is_missing(cost) and not is_missing(freight)
+        complete = is_brush or (not is_missing(cost) and not is_missing(freight))
         if complete:
-            product_cost = 0 if brush_cost else int(cost)
-            freight_cost = 0 if brush_cost else int(freight)
+            product_cost = 0 if is_brush else int(cost)
+            freight_cost = 0 if is_brush else int(freight)
             profit = receipt - refund - product_cost - freight_cost - brush_cost - platform_fee - tax
             margin = Decimal(profit) / Decimal(base) if base else Decimal("0")
             status = "已核算"

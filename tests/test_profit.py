@@ -94,8 +94,8 @@ def test_brush_order_amount_becomes_brush_cost_and_not_profit(tmp_path: Path) ->
                 "退款状态": "无退款",
                 "退款金额_分": None,
                 "买家应付货款_分": 10000,
-                "核算成本_分": 3000,
-                "核算运费_分": 500,
+                "核算成本_分": None,
+                "核算运费_分": None,
                 "cleaning_reasons": ("商家备注包含字母D/d",),
             }
         ]
@@ -106,12 +106,14 @@ def test_brush_order_amount_becomes_brush_cost_and_not_profit(tmp_path: Path) ->
         supplement_audit=pd.DataFrame(),
     )
 
-    row = calculate_order_profit(costs, _config(tmp_path)).normal.iloc[0]
+    result = calculate_order_profit(costs, _config(tmp_path))
+    row = result.normal.iloc[0]
 
     assert row["平台扣点_分"] == 600
     assert row["综合税赋_分"] == 230
     assert row["刷单成本_分"] == 10000
     assert row["正常订单利润_分"] == -830
+    assert result.incomplete_rows == 0
 
 
 def test_closed_loss_is_positive_and_profit_is_negative(tmp_path: Path) -> None:
