@@ -11,7 +11,7 @@ from order_profit.errors import InputContractError
 from order_profit.inputs import LoadedTable
 from order_profit.models import Issue, Severity, SourceLocation
 from order_profit.normalize import is_missing
-from order_profit.rules import OrderPartitions
+from order_profit.rules import NORMAL_STATUSES, OrderPartitions, is_brush_order
 
 SUPPLEMENT_KEYS: Final[list[str]] = ["主订单编号", "商品ID", "商家编码"]
 ACTIVE_SUPPLEMENT_STATUSES: Final[frozenset[str]] = frozenset({"", "已确认", "已同步"})
@@ -300,6 +300,20 @@ def _resolve_row(
     quantity = int(row["购买数量_标准"])
     standard = cost_lookup.get(code)
     price_difference = bool(row.get("是否补差价专用", False))
+
+    if str(row.get("订单状态", "")) in NORMAL_STATUSES and is_brush_order(row):
+        return (
+            {
+                "产品名称": standard[2] if standard and standard[2] else "未归类",
+                "核算成本_分": 0,
+                "成本来源": "刷单业务规则",
+                "核算运费_分": 0,
+                "运费来源": "刷单业务规则",
+                "运费阻断回退": False,
+                "成本运费状态": "已核算",
+            },
+            issues,
+        )
 
     supplement_cost = row.get("补充货品成本_分")
     if price_difference:

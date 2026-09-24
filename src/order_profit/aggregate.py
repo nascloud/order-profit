@@ -13,6 +13,7 @@ from order_profit.errors import NormalizationError
 from order_profit.inputs import LoadedTable
 from order_profit.models import Issue, Severity, SourceLocation
 from order_profit.profit import ProfitResult
+from order_profit.rules import has_brush_marker
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,16 +50,16 @@ def _sum(frame: pd.DataFrame, column: str) -> int:
 
 
 def _brush_amount(frame: pd.DataFrame) -> int:
-    if frame.empty or "cleaning_reasons" not in frame:
+    if frame.empty or "商家备注" not in frame:
         return 0
-    mask = frame["cleaning_reasons"].map(lambda reasons: "商家备注包含字母" in str(reasons))
+    mask = frame["商家备注"].map(has_brush_marker)
     return _sum(frame[mask], "实收金额_分")
 
 
 def _non_brush(frame: pd.DataFrame) -> pd.DataFrame:
-    if frame.empty or "cleaning_reasons" not in frame:
+    if frame.empty or "商家备注" not in frame:
         return frame
-    return frame[~frame["cleaning_reasons"].map(lambda reasons: "商家备注包含字母" in str(reasons))]
+    return frame[~frame["商家备注"].map(has_brush_marker)]
 
 
 def _real_sales(sales: int, refunds: int, brush: int) -> int:

@@ -202,9 +202,18 @@ def test_missing_code_with_supplemented_cost_and_freight_enters_normal(
     assert result.normal.iloc[0]["商家编码"] == ""
 
 
-def test_missing_code_ignores_internal_order_amount_placeholders(
-    tmp_path: Path,
-) -> None:
+def test_missing_code_brush_order_enters_normal_partition(tmp_path: Path) -> None:
+    table = _table(
+        tmp_path,
+        [_row(2, 商家编码="", 商家备注="D")],
+    )
+
+    result = partition_orders(table, _config(tmp_path))
+
+    assert len(result.normal) == 1
+    assert result.missing_merchant_code.empty
+
+
     table = _table(
         tmp_path,
         [_row(2, 商家编码="", 货品成本_分=1200, 运费_分=800)],

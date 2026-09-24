@@ -21,7 +21,7 @@ NORMAL_STATUSES: Final[frozenset[str]] = frozenset(
 CLOSED_STATUS: Final[str] = "交易关闭"
 PRICE_DIFFERENCE_TITLE: Final[str] = "补差价专用"
 BRUSH_ORDER_MARKER: Final[re.Pattern[str]] = re.compile(
-    r"(?<![a-z0-9])[ds](?![a-z0-9])", re.IGNORECASE
+    r"(?<![a-z0-9])[ds](?![a-z0-9])", re.IGNORECASE | re.ASCII
 )
 
 
@@ -87,6 +87,18 @@ class OrderPartitions:
 
 def _text(value: object) -> str:
     return "" if is_missing(value) else str(value)
+
+
+def has_brush_marker(value: object) -> bool:
+    """判断文本中是否包含独立的 ASCII D/d 或 S/s 标记。"""
+
+    return bool(BRUSH_ORDER_MARKER.search(_text(value)))
+
+
+def is_brush_order(row: pd.Series) -> bool:
+    """按商家备注统一识别刷单订单。"""
+
+    return has_brush_marker(row.get("商家备注"))
 
 
 def _location(row: pd.Series, field: str) -> SourceLocation:
@@ -217,11 +229,15 @@ def classify_orders(data: pd.DataFrame) -> tuple[dict[OrderPartition, pd.DataFra
     eligible_status = status.isin(NORMAL_STATUSES | {CLOSED_STATUS})
     price_difference_mask = data.apply(is_price_difference, axis=1)
     direct_amounts_mask = data.apply(_has_direct_cost_and_freight, axis=1)
+    brush_normal_mask = status.isin(NORMAL_STATUSES) & data["商家备注"].map(
+        has_brush_marker
+    )
     missing_code_mask = (
         eligible_status
         & merchant_code.eq("")
         & ~price_difference_mask
         & ~direct_amounts_mask
+        & ~brush_normal_mask
     )
     normal_mask = status.isin(NORMAL_STATUSES) & ~missing_code_mask
     closed_mask = status.eq(CLOSED_STATUS) & ~missing_code_mask

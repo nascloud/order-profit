@@ -96,7 +96,7 @@ def test_brush_order_amount_becomes_brush_cost_and_not_profit(tmp_path: Path) ->
                 "买家应付货款_分": 10000,
                 "核算成本_分": None,
                 "核算运费_分": None,
-                "cleaning_reasons": ("商家备注包含字母D/d",),
+                "商家备注": "D",
             }
         ]
     )

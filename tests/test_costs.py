@@ -211,7 +211,28 @@ def test_manual_supplement_is_only_used_when_reference_tables_do_not_resolve(
     assert (third["核算运费_分"], third["运费来源"]) == (45, "成本编码表标准运费")
 
 
-def test_same_order_waybill_assigns_all_freight_to_normal_rows(tmp_path: Path) -> None:
+def test_brush_order_without_code_resolves_zero_cost_and_freight(tmp_path: Path) -> None:
+    normal = pd.DataFrame(
+        [_order(2, 商家编码="", 订单状态="交易成功", 商家备注="D")]
+    )
+
+    result = resolve_costs_and_freight(
+        _partitions(normal),
+        costs=None,
+        freight=None,
+        supplement_audit=pd.DataFrame(),
+    )
+    row = result.normal.iloc[0]
+
+    assert row["核算成本_分"] == 0
+    assert row["成本来源"] == "刷单业务规则"
+    assert row["核算运费_分"] == 0
+    assert row["运费来源"] == "刷单业务规则"
+    assert result.missing_cost_rows == 0
+    assert result.missing_freight_rows == 0
+    assert not result.issues
+
+
     normal = pd.DataFrame(
         [
             _order(

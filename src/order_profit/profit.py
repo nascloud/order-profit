@@ -12,6 +12,7 @@ from order_profit.costs import CostResolutionResult
 from order_profit.inputs import LoadedTable
 from order_profit.models import Issue, Severity, SourceLocation
 from order_profit.normalize import is_missing
+from order_profit.rules import is_brush_order
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,10 +34,6 @@ class ProfitResult:
 def _rate_amount(base_cents: int, rate: Decimal) -> int:
     amount = (Decimal(base_cents) * rate).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
     return int(amount)
-
-
-def _is_brush_order(row: pd.Series) -> bool:
-    return "商家备注包含字母" in str(row.get("cleaning_reasons", ""))
 
 
 def _refund_exceeds_receipt_issue(row: pd.Series, receipt: int, refund: int) -> Issue:
@@ -72,7 +69,7 @@ def calculate_order_profit(costs: CostResolutionResult, config: RunConfig) -> Pr
         base = max(receipt - refund, 0)
         platform_fee = _rate_amount(base, config.platform_fee_rate)
         tax = _rate_amount(base, config.tax_rate)
-        is_brush = _is_brush_order(row)
+        is_brush = is_brush_order(row)
         brush_cost = receipt if is_brush else 0
         cost = row.get("核算成本_分")
         freight = row.get("核算运费_分")

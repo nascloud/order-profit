@@ -99,7 +99,7 @@ def _profit() -> ProfitResult:
                 "正常订单利润_分": 4753,
                 "核算状态": "已核算",
                 "商家编码": "SKU1",
-                "cleaning_reasons": ("商家备注包含字母D/d",),
+                "商家备注": "D",
             }
         ]
     )
