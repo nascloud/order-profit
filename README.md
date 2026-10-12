@@ -40,6 +40,45 @@ Windows 桌面界面使用 Python 标准库 Tkinter，无额外 Web 服务。
 
 脚本使用 `uv` 安装打包依赖，嵌入 `assets/app-icon.ico`，并生成 `dist/订单利润核算-v版本号.exe`。`build/`、`dist/` 和 PyInstaller 临时配置均不提交 Git。
 
+## macOS x86_64 CLI 打包
+
+支持 Intel Mac 的独立命令行程序，运行时不需要安装 Python。当前发布沿用 `0.2.2` 业务版本，以 `macos-x86_64` 后缀区分平台；不包含桌面 GUI，也不是 Apple Silicon 原生程序。
+
+在 macOS x86_64 环境安装 [uv](https://docs.astral.sh/uv/) 后构建：
+
+```bash
+bash scripts/build-macos-x86_64.sh --clean
+```
+
+脚本创建独立的 `.venv-macos-x86_64`（Python 3.13），不修改 Windows 的 `.venv`；检查宿主和 Python 架构，并将 Excel 读取依赖及业务时区数据打入单文件程序。不支持从 Windows/Linux 交叉编译。
+
+生成文件：
+
+```text
+dist/order-profit-cli-v0.2.2-macos-x86_64
+dist/order-profit-cli-skill-v0.2.2-macos-x86_64.zip
+```
+
+直接运行：
+
+```bash
+./dist/order-profit-cli-v0.2.2-macos-x86_64 --version
+./dist/order-profit-cli-v0.2.2-macos-x86_64 run \
+  --orders '订单.xlsx' \
+  --costs '成本编码表.xlsx' \
+  --freight '运费.xls' \
+  --start-date 2026-08-01 \
+  --end-date 2026-08-07 \
+  --platform tmall \
+  --output-dir '核算结果'
+```
+
+参数和退出码与下面的 Python CLI 相同。技能包解压后，通过 `bash '<skill-dir>/scripts/order-profit.sh'` 传入相同参数即可。
+
+若复制或解压后丢失执行权限，执行 `chmod +x '<程序路径>'`。构建产物仅带 ad-hoc 签名，未做 Apple Developer ID 签名或公证；跨机器下载后可能被 Gatekeeper 拦截，仅在确认来源可信后通过 macOS 的隐私与安全性设置允许运行。
+
+已在 macOS x86_64 验证独立程序的 XLS/XLSX 读取、中文及空格路径、内置时区、Excel/HTML 报告生成、人工补充闭环和解压后的技能包调用。
+
 ## 桌面启动器
 
 安装项目后运行：

@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
+.venv-macos-x86_64/
 .pytest_cache/
 .coverage
 htmlcov/
