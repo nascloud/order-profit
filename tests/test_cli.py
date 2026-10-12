@@ -83,8 +83,9 @@ def test_validate_inputs_writes_manifest(tmp_path: Path) -> None:
     assert all(check["passed"] for check in manifest["reconciliation"])
 
 
+@pytest.mark.parametrize("command", ["validate-inputs", "run"])
 def test_validate_complete_order_without_source_cost_or_freight_columns(
-    tmp_path: Path,
+    tmp_path: Path, command: str,
 ) -> None:
     orders = tmp_path / "orders.xlsx"
     costs = tmp_path / "costs.xlsx"
@@ -114,12 +115,16 @@ def test_validate_complete_order_without_source_cost_or_freight_columns(
         {"编码": ["SKU1"], "成本": ["1.50"], "运费": ["3.00"]}
     ).to_excel(costs, sheet_name="Sheet1", index=False)
     pd.DataFrame(
-        {"运单号": ["W1"], "订单编码": ["001"], "总运费": ["8.00"]}
+        {
+            "运单号": ["W1", "MOTHER", "OTHER", "ORPHAN"],
+            "订单编码": ["001_W1", "001_MOTHER", "001_OTHER", ""],
+            "总运费": ["0.00", "7.00", "1.00", "90.00"],
+        }
     ).to_excel(freight, sheet_name="Sheet1", index=False)
 
     result = main(
         [
-            "validate-inputs",
+            command,
             "--orders",
             str(orders),
             "--costs",
@@ -139,10 +144,15 @@ def test_validate_complete_order_without_source_cost_or_freight_columns(
     )
 
     assert result == 0
-    manifest = json.loads((output / "validation-manifest.json").read_text(encoding="utf-8"))
+    manifest_name = "validation-manifest.json" if command == "validate-inputs" else "manifest.json"
+    manifest = json.loads((output / manifest_name).read_text(encoding="utf-8"))
     assert manifest["status"] == "FINAL"
-    assert manifest["cost_freight"]["missing_cost_rows"] == 0
-    assert manifest["cost_freight"]["missing_freight_rows"] == 0
+    missing_order = [
+        issue for issue in manifest["issues"] if issue["code"] == "FREIGHT_ORDER_ID_MISSING"
+    ]
+    assert len(missing_order) == 1
+    assert missing_order[0]["location"]["row"] == 5
+    assert missing_order[0]["location"]["field"] == "订单编码"
     assert manifest["summary"]["已核算货品成本_分"] == 300
     assert manifest["summary"]["已核算运费_分"] == 800
 

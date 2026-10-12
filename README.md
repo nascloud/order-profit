@@ -9,7 +9,7 @@ P1～P12 已实现：
 - Excel/CSV 输入契约、编码回退、SHA-256 和源行审计；
 - ID、日期、数量、金额的严格标准化；
 - 订单清洗、期间过滤和六个互斥分区；
-- 原始订单表不要求成本或运费列；成本按商家编码从成本编码表解析，运费按物流单号从运费表解析，仍无法匹配时才进入人工补充；成本表兼容`编码/成本/运费`和`商家编码/单件成本/单件运费`两组表头；
+- 原始订单表不要求成本或运费列；成本按商家编码从成本编码表解析，实际运费按主订单编号匹配运费表（取`订单编码`第一个下划线前的订单号，汇总该订单各运单总运费）；未匹配时尝试标准运费，再进入人工补充。详细口径见开发文档第 5.3、7.5 节；成本表支持`编码/成本/运费`和`商家编码/单件成本/单件运费`两组表头；
 - 人工补充、成本与实际/标准运费解析；
 - 有效退款、平台扣点、综合税赋、正常利润和关闭已发货损失；
 - 售后主订单级复核、推广每日/链接汇总、SKU/链接/店铺分析；
@@ -28,7 +28,7 @@ python -m pip install -e ".[dev]"
 pytest
 ```
 
-Windows 桌面界面使用 Python 标准库 Tkinter，无额外 Web 服务。
+Windows 和 macOS 桌面界面使用 Python 标准库 Tkinter，无额外 Web 服务；打包后的程序不需要用户安装 Python。
 
 ## Windows 打包与版本
 
@@ -38,11 +38,17 @@ Windows 桌面界面使用 Python 标准库 Tkinter，无额外 Web 服务。
 .\scripts\build-windows.ps1 -Clean
 ```
 
-脚本使用 `uv` 安装打包依赖，嵌入 `assets/app-icon.ico`，并生成 `dist/订单利润核算-v版本号.exe`。`build/`、`dist/` 和 PyInstaller 临时配置均不提交 Git。
+脚本使用 `uv` 安装打包依赖，嵌入 `assets/app-icon.ico`，并生成 `dist/订单利润核算-v0.2.3.exe`。随后调用 `scripts/build-cli-skill.ps1`，生成独立 CLI `dist/order-profit-cli-v0.2.3.exe` 和技能包 `dist/order-profit-cli-skill-v0.2.3.zip`；CLI 与 UI 均须包含 XLS/XLSX 读取依赖及业务时区数据。`build/`、`dist/` 和 PyInstaller 临时配置均不提交 Git。
 
-## macOS x86_64 CLI 打包
+Windows 必须在原生 Windows x86_64 环境构建，不在 macOS 上交叉打包。`.github/workflows/package-windows.yml` 提供原生 runner 构建、回归和产物上传；临时 `package-*` 分支可用于打包当前本地源码快照，不改动 `main`，快照不包含 `data/`、`output/` 或 `测试数据/`。发布验收包括实际启动 UI 并检查窗口，以及独立 CLI 和解压技能包运行核算、核对运费场景与输出报告。
 
-支持 Intel Mac 的独立命令行程序，运行时不需要安装 Python。当前发布沿用 `0.2.2` 业务版本，以 `macos-x86_64` 后缀区分平台；不包含桌面 GUI，也不是 Apple Silicon 原生程序。
+`0.2.3` 已在[原生 Windows runner](https://github.com/nascloud/order-profit/actions/runs/38227935758)完成构建与验收：110 项回归通过；UI 通过真实键盘输入生成 `FINAL` 报告，独立 CLI 和解压技能包也生成相同业务金额并通过勾稽。验收使用合成数据，运行环境的 `PATH` 不含 Python；截图、运行清单、包 SHA-256 和结果保存在 `dist/`。
+
+## macOS x86_64 UI、CLI 与技能包打包
+
+支持 Intel Mac 的 `.app` 桌面程序和独立命令行程序，运行时不需要安装 Python。本次发布版本为 `0.2.3`，以 `macos-x86_64` 后缀区分平台；不是 Apple Silicon 原生程序。UI 与 CLI 是独立入口，技能包调用 CLI。
+
+`0.2.3` 纳入规范 `1.2` 的订单号运费汇总匹配，以及混合刷单明细不占实际运费分摊份额的修复。发布验收须覆盖独立 CLI 和解压技能包的实际调用：子母单、同订单混合刷单/普通明细、刷单/关闭已发货明细、纯刷单正常订单；金额口径见[开发文档第 5.3、7.5 节](docs/订单利润核算标准化程序开发文档.md)。
 
 在 macOS x86_64 环境安装 [uv](https://docs.astral.sh/uv/) 后构建：
 
@@ -50,20 +56,22 @@ Windows 桌面界面使用 Python 标准库 Tkinter，无额外 Web 服务。
 bash scripts/build-macos-x86_64.sh --clean
 ```
 
-脚本创建独立的 `.venv-macos-x86_64`（Python 3.13），不修改 Windows 的 `.venv`；检查宿主和 Python 架构，并将 Excel 读取依赖及业务时区数据打入单文件程序。不支持从 Windows/Linux 交叉编译。
+脚本创建独立的 `.venv-macos-x86_64`（Python 3.13），不修改 Windows 的 `.venv`；检查宿主、Python 架构和 Tkinter，构建带图标的 `.app`、独立 CLI 及技能包。两种程序均包含 Excel 读取依赖及业务时区数据。不支持从 Windows/Linux 交叉编译。
 
 生成文件：
 
 ```text
-dist/order-profit-cli-v0.2.2-macos-x86_64
-dist/order-profit-cli-skill-v0.2.2-macos-x86_64.zip
+dist/order-profit-cli-v0.2.3-macos-x86_64
+dist/订单利润核算-v0.2.3-macos-x86_64.app
+dist/订单利润核算-v0.2.3-macos-x86_64.app.zip
+dist/order-profit-cli-skill-v0.2.3-macos-x86_64.zip
 ```
 
 直接运行：
 
 ```bash
-./dist/order-profit-cli-v0.2.2-macos-x86_64 --version
-./dist/order-profit-cli-v0.2.2-macos-x86_64 run \
+./dist/order-profit-cli-v0.2.3-macos-x86_64 --version
+./dist/order-profit-cli-v0.2.3-macos-x86_64 run \
   --orders '订单.xlsx' \
   --costs '成本编码表.xlsx' \
   --freight '运费.xls' \
@@ -75,9 +83,15 @@ dist/order-profit-cli-skill-v0.2.2-macos-x86_64.zip
 
 参数和退出码与下面的 Python CLI 相同。技能包解压后，通过 `bash '<skill-dir>/scripts/order-profit.sh'` 传入相同参数即可。
 
+桌面用户解压 `.app.zip` 后双击 `.app`；移动整个 `.app`，不要只复制 `Contents/MacOS` 中的可执行文件。UI 发布验收须实际启动窗口，填写输入与日期并执行核算，核对生成的报告；CLI 与技能包按上述运费场景验收。
+
 若复制或解压后丢失执行权限，执行 `chmod +x '<程序路径>'`。构建产物仅带 ad-hoc 签名，未做 Apple Developer ID 签名或公证；跨机器下载后可能被 Gatekeeper 拦截，仅在确认来源可信后通过 macOS 的隐私与安全性设置允许运行。
 
 已在 macOS x86_64 验证独立程序的 XLS/XLSX 读取、中文及空格路径、内置时区、Excel/HTML 报告生成、人工补充闭环和解压后的技能包调用。
+
+`0.2.3` 已通过上述运费场景验收：独立程序和解压技能包均在项目目录外、`PATH` 不含 Python 的环境运行，生成 `FINAL` 报告并通过金额勾稽；技能包内程序的 SHA-256 与独立程序一致。另用 `测试数据/` 中的 9 月、10 月订单与物流表核对了 1,260 个有实际运费接收方的订单，订单运费合计均守恒；真实样本仍有缺失商家编码或成本/运费，输出为 `PROVISIONAL`，需要按待补清单处理，不能作为完整财务结算结果。
+
+同版本 `.app.zip` 已在解压后通过 LaunchServices 实际启动、填写输入与日期并点击生成，得到 `FINAL` Excel/HTML 报告；子母单、混合刷单/普通、刷单/关闭已发货、纯刷单四类金额均符合规则。`.app` 的 x86_64 架构、版本元数据和 ad-hoc 签名完整性均已核对，桌面截图保存在 `dist/mac-ui-generated.png`。
 
 ## 桌面启动器
 
@@ -211,6 +225,8 @@ order-profit/
 - HTML 动作标签只作运营复盘提示，不自动修改推广计划。
 
 ## 文档
+
+- `AGENTS.md`：项目级开发规则与资料优先、TDD、最小实现、最终核对的开发周期。
 
 - `docs/当前处理逻辑与流程.md`：当前版本完整处理流程。
 - `docs/处理规则.md`：核心业务口径速查。

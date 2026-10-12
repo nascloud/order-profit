@@ -29,6 +29,24 @@ fi
 python="$venv/bin/python"
 "$python" -c 'import platform, sys; sys.exit(0 if sys.platform == "darwin" and platform.machine() == "x86_64" else "Build Python must be macOS x86_64")'
 uv pip install --python "$python" -e '.[build]'
+"$python" - <<'PY'
+from pathlib import Path
+import tkinter
+from PyInstaller.utils.hooks.tcl_tk import tcltk_info
+
+tkinter.Tcl()
+if not tcltk_info.available:
+    raise SystemExit("Build Python must provide working Tcl/Tk for the desktop app.")
+for directory, script in (
+    (tcltk_info.tcl_data_dir, "init.tcl"),
+    (tcltk_info.tk_data_dir, "tk.tcl"),
+):
+    if not directory or not (Path(directory) / script).is_file():
+        raise SystemExit(f"Build Python is missing Tcl/Tk runtime resources: {script}")
+for library in (tcltk_info.tcl_shared_library, tcltk_info.tk_shared_library):
+    if not library or not Path(library).is_file():
+        raise SystemExit("Build Python must provide bundleable Tcl and Tk shared libraries.")
+PY
 
 version="$("$python" -c 'import order_profit; print(order_profit.__version__)')"
 exe_name="order-profit-cli-v${version}-macos-x86_64"
@@ -44,6 +62,57 @@ exe_name="order-profit-cli-v${version}-macos-x86_64"
     --paths src \
     src/order_profit/__main__.py
 
+icon_tmp="$(mktemp -d "${TMPDIR:-/tmp}/order-profit-icon.XXXXXX")"
+trap 'rm -rf "$icon_tmp"' EXIT
+iconset="$icon_tmp/app.iconset"
+mkdir -p "$iconset"
+for size in 16 32 128 256 512; do
+    sips -z "$size" "$size" "$root/assets/app-icon.png" \
+        --out "$iconset/icon_${size}x${size}.png" >/dev/null
+    sips -z "$((size * 2))" "$((size * 2))" "$root/assets/app-icon.png" \
+        --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
+done
+iconutil -c icns "$iconset" -o "$icon_tmp/app.icns"
+
+app_name="订单利润核算-v${version}-macos-x86_64"
+"$python" -m PyInstaller ${clean_args[@]+"${clean_args[@]}"} \
+    --noconfirm \
+    --onedir \
+    --windowed \
+    --target-arch x86_64 \
+    --hidden-import openpyxl \
+    --hidden-import xlrd \
+    --collect-data tzdata \
+    --icon "$icon_tmp/app.icns" \
+    --osx-bundle-identifier com.nascloud.order-profit \
+    --specpath "$root/build/macos-ui" \
+    --name "$app_name" \
+    --paths src \
+    src/order_profit/desktop.py
+
+app="$root/dist/${app_name}.app"
+# PyInstaller's CLI does not expose bundle version fields. Update them and
+# renew the outer ad-hoc signature without changing nested library signatures.
+"$python" - "$app/Contents/Info.plist" "$version" <<'PY'
+import plistlib
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+with path.open("rb") as stream:
+    metadata = plistlib.load(stream)
+metadata.update(
+    CFBundleDisplayName="订单利润核算",
+    CFBundleShortVersionString=sys.argv[2],
+    CFBundleVersion=sys.argv[2],
+)
+with path.open("wb") as stream:
+    plistlib.dump(metadata, stream)
+PY
+codesign --force --sign - "$app"
+app_archive="${app}.zip"
+ditto -c -k --keepParent "$app" "$app_archive"
+
 package_root="$root/dist/order-profit-cli-skill-v${version}-macos-x86_64"
 skill_root="$package_root/order-profit-cli"
 if [[ -d "$package_root" ]]; then
@@ -57,4 +126,5 @@ chmod +x "$skill_root/assets/order-profit-cli-macos-x86_64" "$skill_root/scripts
 archive="${package_root}.zip"
 ditto -c -k --keepParent "$skill_root" "$archive"
 
-printf 'CLI: %s\nSkill: %s\nArchive: %s\n' "$root/dist/$exe_name" "$skill_root" "$archive"
+printf 'CLI: %s\nUI: %s\nUI archive: %s\nSkill archive: %s\n' \
+    "$root/dist/$exe_name" "$app" "$app_archive" "$archive"

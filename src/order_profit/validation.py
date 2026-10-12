@@ -181,15 +181,30 @@ def normalize_freight(table: LoadedTable, config: RunConfig) -> LoadedTable:
     del config
     data = table.data.copy().drop_duplicates()
     _require_nonempty_key(data, column="运单号", role="运费表")
+    data["主订单编号"] = data["订单编码"].map(
+        lambda value: "" if is_missing(value) else str(value).partition("_")[0].strip()
+    )
     _map_column(data, "总运费", "总运费_分", money_to_cents, nonnegative=True)
     data = _raise_duplicate_conflict(
         data,
         key="运单号",
-        value_columns=["总运费_分"],
+        value_columns=["主订单编号", "总运费_分"],
         role="运费表",
         code="FREIGHT_WAYBILL_CONFLICT",
     )
-    return LoadedTable(data=data, metadata=table.metadata, issues=table.issues)
+    issues = list(table.issues)
+    for index in data.index[data["主订单编号"].eq("")]:
+        issues.append(
+            Issue(
+                code="FREIGHT_ORDER_ID_MISSING",
+                severity=Severity.WARNING,
+                message="运费表订单编码无法提取订单号，该行不参与实际运费匹配",
+                location=_location(data, index, "订单编码"),
+                raw_value=data.at[index, "订单编码"],
+                suggestion="补齐订单编码中的订单号后重新核算",
+            )
+        )
+    return LoadedTable(data=data, metadata=table.metadata, issues=tuple(issues))
 
 
 def normalize_after_sales(table: LoadedTable, config: RunConfig) -> LoadedTable:

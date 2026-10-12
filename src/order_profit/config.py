@@ -35,7 +35,7 @@ PLATFORM_FEE_RATES: dict[Platform, Decimal] = {
     Platform.TAOBAO: Decimal("0.006"),
 }
 TAX_RATE = Decimal("0.023")
-SPEC_VERSION = "1.1"
+SPEC_VERSION = "1.2"
 DEFAULT_S_PROFIT_SHARE = Decimal("0.50")
 DEFAULT_A_PROFIT_SHARE = Decimal("0.80")
 

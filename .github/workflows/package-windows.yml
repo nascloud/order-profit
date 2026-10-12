@@ -1,0 +1,89 @@
+name: Package Windows x64
+
+on:
+  push:
+    branches: ['package-*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - name: Restore optional source snapshot safely
+        shell: python
+        run: |
+          from pathlib import Path, PureWindowsPath
+          import tarfile
+
+          root = Path.cwd().resolve()
+          archive = root / 'build-source.tar.gz'
+          if archive.is_file():
+              with tarfile.open(archive, 'r:gz') as source:
+                  members = source.getmembers()
+                  for member in members:
+                      name = member.name
+                      parts = Path(name).parts
+                      target = (root / name).resolve()
+                      if (not (member.isfile() or member.isdir())
+                              or '\\' in name or ':' in name
+                              or PureWindowsPath(name).is_absolute()
+                              or '..' in parts or '.git' in parts
+                              or not target.is_relative_to(root)):
+                          raise RuntimeError(f'Unsafe source snapshot member: {name}')
+                  source.extractall(root, members=members, filter='data')
+      - uses: astral-sh/setup-uv@v6
+      - name: Install build, test and desktop acceptance dependencies
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          Start-Transcript -Path dist/dependencies.log
+          try {
+            uv venv --python 3.13 .venv
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            uv pip install --python .venv/Scripts/python.exe -e '.[dev,build]' pyautogui Pillow psutil
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally { Stop-Transcript }
+      - name: Run full test suite
+        run: |
+          & .venv/Scripts/python.exe -m pytest --junitxml=dist/tests.xml 2>&1 | Tee-Object -FilePath dist/tests.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build Windows UI and CLI skill once
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Start-Transcript -Path dist/build-windows.log
+          try {
+            & ./scripts/build-windows.ps1 -Clean
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally { Stop-Transcript }
+      - name: Exercise packaged CLI, skill and native desktop
+        env:
+          PYTHONIOENCODING: utf-8
+        run: |
+          & .venv/Scripts/python.exe scripts/smoke-windows-packages.py --dist dist 2>&1 | Tee-Object -FilePath dist/smoke-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload packages and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: order-profit-v0.2.3-windows-x86_64
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            dist/*.exe
+            dist/*.zip
+            dist/*.png
+            dist/*.json
+            dist/*.log
+            dist/*.xml

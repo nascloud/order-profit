@@ -191,7 +191,7 @@ def test_manual_supplement_is_only_used_when_reference_tables_do_not_resolve(
         tmp_path,
         "freight",
         [
-            {"运单号": "W2", "总运费_分": 999},
+            {"运单号": "W2", "主订单编号": "O2", "总运费_分": 999},
         ],
     )
 
@@ -204,11 +204,12 @@ def test_manual_supplement_is_only_used_when_reference_tables_do_not_resolve(
 
     first, second, third = [row for _, row in result.normal.iterrows()]
     assert (first["核算成本_分"], first["成本来源"]) == (900, "成本编码表")
-    assert (first["核算运费_分"], first["运费来源"]) == (999, "运费表实际运费")
+    assert first["核算运费_分"] == 999
     assert (second["核算成本_分"], second["成本来源"]) == (333, "人工补充")
-    assert (second["核算运费_分"], second["运费来源"]) == (44, "人工补充")
+    assert second["核算运费_分"] == 44
     assert (third["核算成本_分"], third["成本来源"]) == (375, "成本编码表")
-    assert (third["核算运费_分"], third["运费来源"]) == (45, "成本编码表标准运费")
+    assert third["核算运费_分"] == 45
+    assert int(result.normal["核算运费_分"].sum()) == 1088
 
 
 def test_brush_order_without_code_resolves_zero_cost_and_freight(tmp_path: Path) -> None:
@@ -227,19 +228,93 @@ def test_brush_order_without_code_resolves_zero_cost_and_freight(tmp_path: Path)
     assert row["核算成本_分"] == 0
     assert row["成本来源"] == "刷单业务规则"
     assert row["核算运费_分"] == 0
-    assert row["运费来源"] == "刷单业务规则"
     assert result.missing_cost_rows == 0
     assert result.missing_freight_rows == 0
     assert not result.issues
 
 
+@pytest.mark.parametrize("marker", ["D", "d", "S", "s"])
+def test_same_order_brush_row_does_not_take_ordinary_row_freight(
+    tmp_path: Path, marker: str,
+) -> None:
+    normal = pd.DataFrame(
+        [
+            _order(2, 主订单编号="SAME", 订单状态="交易成功", 商家备注=marker),
+            _order(3, 主订单编号="SAME", 订单状态="交易成功", 商家备注="",
+                   补充货品成本_分=100),
+        ]
+    )
+    freight = _loaded(
+        tmp_path, "freight",
+        [{"运单号": "MOTHER", "主订单编号": "SAME", "总运费_分": 1000}],
+    )
+
+    result = resolve_costs_and_freight(
+        _partitions(normal), costs=None, freight=freight, supplement_audit=pd.DataFrame()
+    )
+
+    assert result.normal["核算运费_分"].tolist() == [0, 1000]
+    assert int(result.normal["核算运费_分"].sum()) == 1000
+    assert result.normal["核算成本_分"].tolist() == [0, 100]
+    assert not result.issues
+
+
+def test_same_order_brush_normal_row_leaves_actual_freight_to_closed_row(
+    tmp_path: Path,
+) -> None:
+    normal = pd.DataFrame(
+        [_order(2, 主订单编号="SAME", 订单状态="交易成功", 商家备注="D")]
+    )
+    closed = pd.DataFrame(
+        [_order(3, 主订单编号="SAME", 订单状态="交易关闭", 商家备注="D",
+                物流单号="CLOSED", 补充货品成本_分=100)]
+    )
+    freight = _loaded(
+        tmp_path, "freight",
+        [{"运单号": "MOTHER", "主订单编号": "SAME", "总运费_分": 1000}],
+    )
+
+    result = resolve_costs_and_freight(
+        _partitions(normal, closed), costs=None, freight=freight,
+        supplement_audit=pd.DataFrame(),
+    )
+
+    assert result.normal["核算运费_分"].tolist() == [0]
+    assert result.closed_shipped["核算运费_分"].tolist() == [1000]
+    assert result.closed_shipped["核算成本_分"].tolist() == [100]
+    assert not result.issues
+
+
+def test_same_order_only_brush_rows_ignore_actual_freight(tmp_path: Path) -> None:
+    normal = pd.DataFrame(
+        [
+            _order(2, 主订单编号="SAME", 订单状态="交易成功", 商家备注="D"),
+            _order(3, 主订单编号="SAME", 订单状态="交易成功", 商家备注="S"),
+        ]
+    )
+    freight = _loaded(
+        tmp_path, "freight",
+        [{"运单号": "MOTHER", "主订单编号": "SAME", "总运费_分": 1000}],
+    )
+
+    result = resolve_costs_and_freight(
+        _partitions(normal), costs=None, freight=freight, supplement_audit=pd.DataFrame()
+    )
+
+    assert result.normal["核算运费_分"].tolist() == [0, 0]
+    assert result.normal["核算成本_分"].tolist() == [0, 0]
+    assert result.missing_freight_rows == 0
+    assert not result.issues
+
+
+def test_same_order_normal_rows_take_freight_instead_of_closed_rows(tmp_path: Path) -> None:
     normal = pd.DataFrame(
         [
             _order(
                 2,
                 主订单编号="SAME",
                 商家编码="A",
-                物流单号="SHARED",
+                物流单号="NORMAL-WAYBILL",
                 购买数量_标准=1,
             )
         ]
@@ -250,7 +325,7 @@ def test_brush_order_without_code_resolves_zero_cost_and_freight(tmp_path: Path)
                 3,
                 主订单编号="SAME",
                 商家编码="B",
-                物流单号="SHARED",
+                物流单号="CLOSED-WAYBILL",
                 购买数量_标准=3,
             )
         ]
@@ -266,7 +341,7 @@ def test_brush_order_without_code_resolves_zero_cost_and_freight(tmp_path: Path)
     freight = _loaded(
         tmp_path,
         "freight",
-        [{"运单号": "SHARED", "总运费_分": 1201}],
+        [{"运单号": "FREIGHT-WAYBILL", "主订单编号": "SAME", "总运费_分": 1201}],
     )
 
     result = resolve_costs_and_freight(
@@ -277,17 +352,19 @@ def test_brush_order_without_code_resolves_zero_cost_and_freight(tmp_path: Path)
     )
 
     assert result.normal.iloc[0]["核算运费_分"] == 1201
-    assert result.normal.iloc[0]["运费来源"] == "同主订单合并发货运费分摊"
     assert result.closed_shipped.iloc[0]["核算运费_分"] == 0
-    assert result.closed_shipped.iloc[0]["运费来源"] == "同主订单合并发货关闭明细不分摊"
+    assert (
+        int(result.normal["核算运费_分"].sum())
+        + int(result.closed_shipped["核算运费_分"].sum())
+    ) == 1201
     assert not result.issues
 
 
 def test_same_order_multiple_normal_rows_split_by_quantity(tmp_path: Path) -> None:
     normal = pd.DataFrame(
         [
-            _order(2, 主订单编号="SAME", 商家编码="A", 物流单号="SHARED", 购买数量_标准=1),
-            _order(3, 主订单编号="SAME", 商家编码="B", 物流单号="SHARED", 购买数量_标准=3),
+            _order(2, 主订单编号="SAME", 商家编码="A", 物流单号="WAYBILL-A", 购买数量_标准=1),
+            _order(3, 主订单编号="SAME", 商家编码="B", 物流单号="WAYBILL-B", 购买数量_标准=3),
         ]
     )
     costs = _loaded(
@@ -298,7 +375,11 @@ def test_same_order_multiple_normal_rows_split_by_quantity(tmp_path: Path) -> No
             {"编码": "B", "成本_分": 200, "运费_分": 40},
         ],
     )
-    freight = _loaded(tmp_path, "freight", [{"运单号": "SHARED", "总运费_分": 1201}])
+    freight = _loaded(
+        tmp_path,
+        "freight",
+        [{"运单号": "FREIGHT-WAYBILL", "主订单编号": "SAME", "总运费_分": 1201}],
+    )
 
     result = resolve_costs_and_freight(
         _partitions(normal), costs=costs, freight=freight, supplement_audit=pd.DataFrame()
@@ -308,7 +389,7 @@ def test_same_order_multiple_normal_rows_split_by_quantity(tmp_path: Path) -> No
     assert int(result.normal["核算运费_分"].sum()) == 1201
 
 
-def test_cross_order_shared_waybill_splits_by_quantity(tmp_path: Path) -> None:
+def test_different_orders_with_same_logistics_match_their_own_freight(tmp_path: Path) -> None:
     normal = pd.DataFrame(
         [
             _order(
@@ -340,7 +421,10 @@ def test_cross_order_shared_waybill_splits_by_quantity(tmp_path: Path) -> None:
     freight = _loaded(
         tmp_path,
         "freight",
-        [{"运单号": "SHARED", "总运费_分": 50}],
+        [
+            {"运单号": "WAYBILL-A", "主订单编号": "ORDER-A", "总运费_分": 137},
+            {"运单号": "WAYBILL-B", "主订单编号": "ORDER-B", "总运费_分": 263},
+        ],
     )
 
     result = resolve_costs_and_freight(
@@ -350,11 +434,167 @@ def test_cross_order_shared_waybill_splits_by_quantity(tmp_path: Path) -> None:
         supplement_audit=pd.DataFrame(),
     )
 
-    assert result.normal["核算运费_分"].tolist() == [13, 37]
-    assert set(result.normal["运费来源"]) == {"跨主订单共享运单按数量分摊"}
-    assert not result.normal["运费阻断回退"].any()
+    assert result.normal["核算运费_分"].tolist() == [137, 263]
     assert not result.issues
-    assert int(result.normal["核算运费_分"].sum()) == 50
+    assert int(result.normal["核算运费_分"].sum()) == 400
+
+
+@pytest.mark.parametrize("logistics_number", ["CHILD", "UNLISTED", ""])
+def test_order_freight_sums_zero_child_and_multiple_charged_waybills(
+    tmp_path: Path, logistics_number: str
+) -> None:
+    normal = pd.DataFrame(
+        [_order(2, 物流单号=logistics_number, 补充运费_分=77)]
+    )
+    costs = _loaded(
+        tmp_path,
+        "costs",
+        [{"编码": "SKU2", "成本_分": 100, "运费_分": 50}],
+    )
+    freight = _loaded(
+        tmp_path,
+        "freight",
+        [
+            {"运单号": "CHILD", "主订单编号": "O2", "总运费_分": 0},
+            {"运单号": "MOTHER", "主订单编号": "O2", "总运费_分": 1201},
+            {"运单号": "SECOND-CHARGED", "主订单编号": "O2", "总运费_分": 307},
+            {"运单号": "OTHER-ORDER", "主订单编号": "O9", "总运费_分": 9999},
+        ],
+    )
+
+    result = resolve_costs_and_freight(
+        _partitions(normal), costs=costs, freight=freight, supplement_audit=pd.DataFrame()
+    )
+
+    assert result.normal["核算运费_分"].tolist() == [1508]
+    assert int(result.normal["核算运费_分"].sum()) == 1508
+    assert result.missing_freight_rows == 0
+    assert not result.issues
+
+
+@pytest.mark.parametrize("standard_freight", [90, None])
+def test_all_zero_actual_freight_does_not_fall_back(
+    tmp_path: Path, standard_freight: int | None
+) -> None:
+    normal = pd.DataFrame(
+        [_order(2, 物流单号="CHILD", 补充货品成本_分=100, 补充运费_分=77)]
+    )
+    costs = (
+        _loaded(
+            tmp_path,
+            "costs",
+            [{"编码": "SKU2", "成本_分": 100, "运费_分": standard_freight}],
+        )
+        if standard_freight is not None
+        else None
+    )
+    freight = _loaded(
+        tmp_path,
+        "freight",
+        [
+            {"运单号": "CHILD", "主订单编号": "O2", "总运费_分": 0},
+            {"运单号": "MOTHER", "主订单编号": "O2", "总运费_分": 0},
+        ],
+    )
+
+    result = resolve_costs_and_freight(
+        _partitions(normal), costs=costs, freight=freight, supplement_audit=pd.DataFrame()
+    )
+
+    assert result.normal["核算运费_分"].tolist() == [0]
+    assert int(result.normal["核算运费_分"].sum()) == 0
+    assert result.missing_freight_rows == 0
+    assert not result.issues
+
+
+def test_unmatched_order_uses_standard_then_manual_even_with_matching_waybill(
+    tmp_path: Path,
+) -> None:
+    normal = pd.DataFrame(
+        [
+            _order(2, 物流单号="SHARED", 购买数量_标准=3, 补充运费_分=77),
+            _order(
+                3,
+                物流单号="SHARED",
+                购买数量_标准=2,
+                补充货品成本_分=100,
+                补充运费_分=88,
+            ),
+        ]
+    )
+    costs = _loaded(
+        tmp_path,
+        "costs",
+        [{"编码": "SKU2", "成本_分": 100, "运费_分": 50}],
+    )
+    freight = _loaded(
+        tmp_path,
+        "freight",
+        [{"运单号": "SHARED", "主订单编号": "OTHER-ORDER", "总运费_分": 1201}],
+    )
+
+    result = resolve_costs_and_freight(
+        _partitions(normal), costs=costs, freight=freight, supplement_audit=pd.DataFrame()
+    )
+
+    assert result.normal["核算运费_分"].tolist() == [50, 88]
+    assert int(result.normal["核算运费_分"].sum()) == 138
+    assert result.missing_freight_rows == 0
+    assert not result.issues
+
+
+@pytest.mark.parametrize(
+    ("quantities", "expected"),
+    [
+        ((1, 3), [300, 901]),
+        ((1, 1), [600, 601]),
+    ],
+)
+def test_order_with_only_closed_rows_splits_freight_by_quantity_and_source_row(
+    tmp_path: Path, quantities: tuple[int, int], expected: list[int]
+) -> None:
+    closed = pd.DataFrame(
+        [
+            _order(
+                3,
+                主订单编号="SAME",
+                物流单号="CLOSED-A",
+                购买数量_标准=quantities[0],
+            ),
+            _order(
+                2,
+                主订单编号="SAME",
+                物流单号="CLOSED-B",
+                购买数量_标准=quantities[1],
+            ),
+        ]
+    )
+    costs = _loaded(
+        tmp_path,
+        "costs",
+        [
+            {"编码": "SKU2", "成本_分": 100, "运费_分": 30},
+            {"编码": "SKU3", "成本_分": 200, "运费_分": 40},
+        ],
+    )
+    freight = _loaded(
+        tmp_path,
+        "freight",
+        [{"运单号": "FREIGHT-WAYBILL", "主订单编号": "SAME", "总运费_分": 1201}],
+    )
+
+    result = resolve_costs_and_freight(
+        _partitions(closed.iloc[0:0].copy(), closed),
+        costs=costs,
+        freight=freight,
+        supplement_audit=pd.DataFrame(),
+    )
+
+    assert result.normal.empty
+    assert result.closed_shipped["核算运费_分"].tolist() == expected
+    assert int(result.closed_shipped["核算运费_分"].sum()) == 1201
+    assert result.missing_freight_rows == 0
+    assert not result.issues
 
 
 def test_price_difference_has_known_zero_cost_and_freight_without_actual_match(
@@ -382,7 +622,7 @@ def test_price_difference_has_known_zero_cost_and_freight_without_actual_match(
 
     row = result.normal.iloc[0]
     assert (row["核算成本_分"], row["成本来源"]) == (0, "补差价专用业务规则")
-    assert (row["核算运费_分"], row["运费来源"]) == (0, "补差价专用业务规则")
+    assert row["核算运费_分"] == 0
     assert not result.issues
 
 
@@ -393,7 +633,7 @@ def test_price_difference_still_uses_actual_freight(tmp_path: Path) -> None:
     freight = _loaded(
         tmp_path,
         "freight",
-        [{"运单号": "REAL", "总运费_分": 88}],
+        [{"运单号": "REAL", "主订单编号": "O2", "总运费_分": 88}],
     )
 
     result = resolve_costs_and_freight(
@@ -404,7 +644,7 @@ def test_price_difference_still_uses_actual_freight(tmp_path: Path) -> None:
     )
 
     assert result.normal.iloc[0]["核算运费_分"] == 88
-    assert result.normal.iloc[0]["运费来源"] == "运费表实际运费"
+    assert int(result.normal["核算运费_分"].sum()) == 88
 
 
 def test_supplement_audit_records_non_period_partition(tmp_path: Path) -> None:

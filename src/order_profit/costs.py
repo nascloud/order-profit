@@ -216,9 +216,10 @@ def _build_cost_lookup(costs: LoadedTable | None) -> dict[str, tuple[int, int, s
 def _build_freight_lookup(freight: LoadedTable | None) -> dict[str, int]:
     if freight is None:
         return {}
+    rows = freight.data.loc[freight.data["主订单编号"].ne("")]
     return {
-        str(row["运单号"]): int(row["总运费_分"])
-        for _, row in freight.data.iterrows()
+        str(order_id): int(total)
+        for order_id, total in rows.groupby("主订单编号", sort=False)["总运费_分"].sum().items()
     }
 
 
@@ -244,48 +245,41 @@ def _allocate_cents(total: int, rows: pd.DataFrame) -> dict[int, int]:
 def _build_freight_plan(
     partitions: OrderPartitions,
     freight_lookup: dict[str, int],
-) -> dict[int, tuple[int | None, str, bool]]:
-    """为每条有效明细生成实际运费取值、来源和阻断状态。"""
+) -> dict[int, tuple[int, str]]:
+    """按主订单为有效明细分配实际总运费及来源。"""
 
-    normal = partitions.normal.copy()
+    normal = partitions.normal.loc[
+        [
+            not (str(row.get("订单状态", "")) in NORMAL_STATUSES and is_brush_order(row))
+            for _, row in partitions.normal.iterrows()
+        ]
+    ].copy()
     normal["_订单类型"] = "正常订单"
     closed = partitions.closed_shipped.copy()
     closed["_订单类型"] = "关闭已发货"
     rows = pd.concat([normal, closed], ignore_index=True)
-    plan: dict[int, tuple[int | None, str, bool]] = {}
+    plan: dict[int, tuple[int, str]] = {}
     if rows.empty:
         return plan
 
-    rows["_运单号"] = rows["物流单号"].map(lambda value: str(value or ""))
-    for waybill, group in rows[rows["_运单号"] != ""].groupby("_运单号", sort=False):
-        actual = freight_lookup.get(str(waybill))
+    for order_id, group in rows.groupby("主订单编号", sort=False):
+        actual = freight_lookup.get(str(order_id))
         if actual is None:
             continue
         source_rows = group["source_row_number"].astype(int).tolist()
         if len(group) == 1:
-            plan[source_rows[0]] = (actual, "运费表实际运费", False)
+            plan[source_rows[0]] = (actual, "运费表实际运费")
             continue
 
         normal_rows = group[group["_订单类型"] == "正常订单"]
         recipients = normal_rows if not normal_rows.empty else group
         allocations = _allocate_cents(actual, recipients)
-        shared_orders = group["主订单编号"].map(str).nunique() > 1
-        allocated_source = (
-            "跨主订单共享运单按数量分摊"
-            if shared_orders
-            else "同主订单合并发货运费分摊"
-        )
-        closed_source = (
-            "跨主订单共享运单关闭明细不分摊"
-            if shared_orders
-            else "同主订单合并发货关闭明细不分摊"
-        )
         for _, row in group.iterrows():
             source_row = int(row["source_row_number"])
             if source_row in allocations:
-                plan[source_row] = (allocations[source_row], allocated_source, False)
+                plan[source_row] = (allocations[source_row], "同主订单运费按数量分摊")
             else:
-                plan[source_row] = (0, closed_source, False)
+                plan[source_row] = (0, "同主订单关闭明细不分摊")
     return plan
 
 
@@ -293,7 +287,7 @@ def _resolve_row(
     row: pd.Series,
     *,
     cost_lookup: dict[str, tuple[int, int, str]],
-    freight_plan: dict[int, tuple[int | None, str, bool]],
+    freight_plan: dict[int, tuple[int, str]],
 ) -> tuple[dict[str, object], list[Issue]]:
     issues: list[Issue] = []
     code = str(row["商家编码"])
@@ -309,7 +303,6 @@ def _resolve_row(
                 "成本来源": "刷单业务规则",
                 "核算运费_分": 0,
                 "运费来源": "刷单业务规则",
-                "运费阻断回退": False,
                 "成本运费状态": "已核算",
             },
             issues,
@@ -340,29 +333,9 @@ def _resolve_row(
         )
 
     supplement_freight = row.get("补充运费_分")
-    waybill = str(row.get("物流单号") or "")
-    planned_freight, planned_source, planned_blocked = freight_plan.get(
-        int(row["source_row_number"]),
-        (None, "", False),
-    )
-    freight_blocked = False
-    if planned_blocked:
-        resolved_freight = None
-        freight_source = planned_source
-        freight_blocked = True
-        issues.append(
-            Issue(
-                code="FREIGHT_SHARED_ACROSS_ORDERS",
-                severity=Severity.WARNING,
-                message="实际运单被不同主订单共享，运费保持未核算且禁止回退",
-                location=_location(row, "物流单号"),
-                raw_value=waybill,
-                suggestion="核对运单归属，或通过人工补充提供各明细总运费",
-            )
-        )
-    elif planned_source:
-        resolved_freight = int(planned_freight)
-        freight_source = planned_source
+    planned_freight = freight_plan.get(int(row["source_row_number"]))
+    if planned_freight is not None:
+        resolved_freight, freight_source = planned_freight
     elif standard is not None:
         resolved_freight = int(standard[1])
         freight_source = "成本编码表标准运费"
@@ -380,9 +353,9 @@ def _resolve_row(
                 code="ORDER_FREIGHT_MISSING",
                 severity=Severity.WARNING,
                 message="订单明细运费无法解析",
-                location=_location(row, "物流单号"),
-                raw_value=waybill,
-                suggestion="检查运单号、成本编码表标准运费或人工补充表",
+                location=_location(row, "主订单编号"),
+                raw_value=str(row["主订单编号"]),
+                suggestion="检查运费表订单编码、成本编码表标准运费或人工补充表",
             )
         )
 
@@ -393,7 +366,6 @@ def _resolve_row(
             "成本来源": cost_source,
             "核算运费_分": resolved_freight,
             "运费来源": freight_source,
-            "运费阻断回退": freight_blocked,
             "成本运费状态": (
                 "已核算" if resolved_cost is not None and resolved_freight is not None else "成本或运费缺失"
             ),
@@ -406,7 +378,7 @@ def _resolve_frame(
     frame: pd.DataFrame,
     *,
     cost_lookup: dict[str, tuple[int, int, str]],
-    freight_plan: dict[int, tuple[int | None, str, bool]],
+    freight_plan: dict[int, tuple[int, str]],
 ) -> tuple[pd.DataFrame, list[Issue]]:
     result = frame.copy()
     records: list[dict[str, object]] = []
@@ -429,7 +401,6 @@ def _resolve_frame(
             "成本来源",
             "核算运费_分",
             "运费来源",
-            "运费阻断回退",
             "成本运费状态",
         ):
             result[column] = pd.Series(index=result.index, dtype=object)
@@ -467,7 +438,6 @@ def resolve_costs_and_freight(
     closed_unshipped["成本来源"] = "付款后关闭且无物流业务规则"
     closed_unshipped["核算运费_分"] = 0
     closed_unshipped["运费来源"] = "付款后关闭且无物流业务规则"
-    closed_unshipped["运费阻断回退"] = False
     closed_unshipped["成本运费状态"] = "已核算"
 
     audit = supplement_audit.copy()

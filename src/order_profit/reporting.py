@@ -61,7 +61,9 @@ def _manifest_for_result(
         config=config,
         status=result.reconciliation.status,
         inputs={role: table.metadata for role, table in result.tables.items()},
-        issues=list(result.analysis.issues),
+        issues=[
+            issue for table in result.tables.values() for issue in table.issues
+        ] + list(result.analysis.issues),
         completed_at=datetime.now(UTC),
     )
     manifest["stage"] = "P1-P11_REPORTS"
