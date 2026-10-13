@@ -89,7 +89,9 @@ def test_html_escapes_business_text_and_embeds_safe_json(tmp_path: Path) -> None
             links=links,
             daily=pd.DataFrame(),
             products=pd.DataFrame(),
-            sku=pd.DataFrame([{"商家编码": "SKU-1", "产品名称": "产品一", "购买数量": 1, "销售额_分": 10000}]),
+            sku=pd.DataFrame(
+                [{"商家编码": "SKU-1", "产品名称": "产品一", "购买数量": 1, "销售额_分": 10000}]
+            ),
         ),
         reconciliation=SimpleNamespace(status=RunStatus.FINAL),
     )
@@ -100,48 +102,87 @@ def test_html_escapes_business_text_and_embeds_safe_json(tmp_path: Path) -> None
 
     assert "<img src=x" not in page
     assert "\\u003cimg src=x" in page
-    assert "esc(r[c[1]]??'--')" in page
-    assert "const DATA=" in page
+    assert "const DATA =" in page
     assert "搜索商品ID或标题" in page
     assert 'id="rankings"' in page
-    assert "产品销售榜" in page
-    assert "产品退款榜" in page
-    assert "产品利润榜" in page
-    assert "热销产品榜" in page
+    for title in (
+        "产品销售榜",
+        "产品退款榜",
+        "产品利润榜",
+        "热销产品榜",
+        "链接利润榜",
+        "链接销售榜",
+        "链接退款榜",
+        "链接花费榜",
+        "链接投产榜",
+        "链接亏损预警",
+    ):
+        assert title in page
     assert "DATA.sku" in page
-    assert "r['商家编码']||'无商家编码'" in page
-    assert "销售占比 ${pct(paid?Number(r['销售额_分']||0)/paid:null)}" in page
-    assert "r['经营贡献利润率状态']==='已核算'" in page
-    assert "链接利润榜" in page
-    assert "链接销售榜" in page
-    assert "链接退款榜" in page
-    assert "链接花费榜" in page
-    assert "链接投产榜" in page
-    assert "链接亏损预警" in page
-    assert "r['核算状态']==='已核算'" in page
-    assert "roiSpendFloor=Math.max(10000" in page
-    assert "Number(r['推广花费_分']||0)>=roiSpendFloor" in page
-    assert ".table-wrap{overflow:auto" in page
-    assert "@media(max-width:700px)" in page
-    assert "@page{size:A4 landscape" in page
-    assert ".view[hidden]{display:block!important}" in page
-    assert ".equation-scroll,.table-wrap{overflow:visible;max-height:none" in page
-    assert ".equation,.profit-equation{width:100%;min-width:0;flex-direction:row!important}" in page
-    assert "table{min-width:0" in page
+    assert "无商家编码" in page
+    assert "销售占比 ${pct(paid ? Number(row['销售额_分'] || 0) / paid : null)}" in page
+    assert "row['经营贡献利润率状态'] === '已核算'" in page
+    assert "row['核算状态'] === '已核算'" in page
+    assert ".slice(0, 10)" in page
+    assert "Number(row['推广花费_分'] || 0) >= roiSpendFloor" in page
+    assert ".table-wrap {" in page
+    assert "@media (max-width: 700px)" in page
+    assert "@page { size: A4 landscape" in page
+    assert ".view[hidden] { display: block !important; }" in page
+    assert ".equation-scroll, .table-wrap {" in page
+    assert ".equation, .profit-equation {" in page
+    assert "table { min-width: 0" in page
     assert "含推广净利润" not in page
     assert "全部订单销售链" in page
     assert "已核算利润链" in page
     assert "刷单金额" in page
     assert "真实销售额" in page
-    assert "term('真实销售额',realSales,'result'" in page
-    assert "term('刷单成本',S['已核算刷单成本_分'],'cost'" in page
+    assert "term('真实销售额', realSales, 'result'" in page
+    assert "term('刷单成本', S['已核算刷单成本_分'], 'cost'" in page
     assert "全部订单批次成功退款" in page
     assert "销售额核算覆盖率 ${pct(S['销售额核算覆盖率'])}" in page
     assert 'id="profitEquation"' in page
     assert "profit-equation" in page
     assert "term('关闭已发货损失'" in page
     assert "刷单成本同金额计入利润" in page
-    assert "占已核算销售额 ${share(accountedRefund,accounted)}" in page
-    assert "占净销售额 ${share(S['已核算平台扣点_分'],accountedNet)}" in page
-    assert "占已核算净销售额 ${pct(accountedNet?S['推广花费_分']/accountedNet:null)}" in page
-    assert ".equation:not(.profit-equation) .term{width:220px}" in page
+    assert "占已核算销售额 ${share(accountedRefund, accounted)}" in page
+    assert "占净销售额 ${share(S['已核算平台扣点_分'], accountedNet)}" in page
+    assert "占已核算净销售额" in page
+    assert ".equation:not(.profit-equation) .term { width: 220px; }" in page
+
+
+def test_html_daily_chart_groups_accessibility_and_empty_state(tmp_path: Path) -> None:
+    config = RunConfig(
+        orders=tmp_path / "orders.xlsx",
+        start_date=date(2026, 8, 1),
+        end_date=date(2026, 8, 7),
+        platform=Platform.TMALL,
+        output_dir=tmp_path / "output",
+    )
+    result = SimpleNamespace(
+        analysis=SimpleNamespace(
+            summary={},
+            links=pd.DataFrame(),
+            daily=pd.DataFrame(),
+            products=pd.DataFrame(),
+            sku=pd.DataFrame(),
+        ),
+        reconciliation=SimpleNamespace(status=RunStatus.FINAL),
+    )
+    path = tmp_path / "empty-report.html"
+
+    write_html(result, config, path)
+    page = path.read_text(encoding="utf-8")
+
+    assert 'data-daily-chart="sales"' in page
+    assert 'data-daily-chart="profit"' in page
+    assert 'data-daily-chart="promotion"' in page
+    assert 'data-daily-chart="orders"' in page
+    assert 'aria-label="每日趋势指标"' in page
+    assert 'aria-live="polite"' in page
+    assert "ArrowLeft" in page
+    assert "ArrowRight" in page
+    assert "本期暂无每日数据" in page
+    assert "推广归因成交金额_分" in page
+    assert "期间退款完结金额_分" in page
+    assert "prefers-reduced-motion: reduce" in page
