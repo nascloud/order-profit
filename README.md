@@ -25,8 +25,11 @@ P1～P12 已实现：
 ```bash
 python -m venv .venv
 python -m pip install -e ".[dev]"
+python -m playwright install chromium
 pytest
 ```
+
+HTML 报告回归测试使用 Chromium 执行实际 JavaScript，验证每日图表的单点、缺失值断线及交互行为；浏览器仅用于开发测试，不是运行或打包程序的依赖。
 
 Windows 和 macOS 桌面界面使用 Python 标准库 Tkinter，无额外 Web 服务；打包后的程序不需要用户安装 Python。
 

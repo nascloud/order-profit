@@ -641,14 +641,14 @@ const renderDailyChart = key => {
     button.setAttribute('aria-pressed', String(selected));
   });
   if (!dailyRows.length) {
-    chartNode.hidden = true;
+    chartNode.style.display = 'none';
     chartEmpty.hidden = false;
     chartLegend.innerHTML = '';
     chartReadout.textContent = '暂无每日数据';
     chartPeriod.textContent = '暂无数据';
     return;
   }
-  chartNode.hidden = false;
+  chartNode.style.display = '';
   chartEmpty.hidden = true;
   chartPeriod.textContent =
     `${dailyRows[0]['日期']} 至 ${dailyRows[dailyRows.length - 1]['日期']} · ` +
@@ -740,8 +740,11 @@ const renderDailyChart = key => {
     let segment = [];
     const flush = () => {
       if (segment.length > 1) {
+        const path = segment.map((point, index) =>
+          `${index ? 'L' : 'M'}${point.x.toFixed(2)},${point.y.toFixed(2)}`
+        ).join(' ');
         parts.push(
-          `<path class="chart-line" stroke="${series.color}" d="${segment.join(' ')}"/>`
+          `<path class="chart-line" stroke="${series.color}" d="${path}"/>`
         );
       } else if (segment.length === 1) {
         const point = segment[0];
@@ -757,8 +760,7 @@ const renderDailyChart = key => {
         flush();
         return;
       }
-      const point = { x: x(index), y: y(value, axis) };
-      segment.push(`${segment.length ? 'L' : 'M'}${point.x.toFixed(2)},${point.y.toFixed(2)}`);
+      segment.push({ x: x(index), y: y(value, axis) });
     });
     flush();
   });

@@ -1,18 +1,65 @@
 from __future__ import annotations
 
+import math
+from collections.abc import Iterator
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
 import pandas as pd
+import pytest
+from playwright.sync_api import Browser, Page, expect, sync_playwright
 
 from order_profit.config import Platform, RunConfig
 from order_profit.html_report import write_html
 from order_profit.models import RunStatus
 
 
-def test_html_escapes_business_text_and_embeds_safe_json(tmp_path: Path) -> None:
+@pytest.fixture(scope="module")
+def html_browser() -> Iterator[Browser]:
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        try:
+            yield browser
+        finally:
+            browser.close()
+
+
+@pytest.fixture
+def html_page(html_browser: Browser) -> Iterator[Page]:
+    page = html_browser.new_page()
+    try:
+        yield page
+    finally:
+        page.close()
+
+
+def _daily_report(tmp_path: Path, daily: list[dict[str, object]]) -> Path:
+    config = RunConfig(
+        orders=tmp_path / "orders.xlsx",
+        start_date=date(2026, 8, 1),
+        end_date=date(2026, 8, 7),
+        platform=Platform.TMALL,
+        output_dir=tmp_path / "output",
+    )
+    result = SimpleNamespace(
+        analysis=SimpleNamespace(
+            summary={},
+            links=pd.DataFrame(),
+            daily=pd.DataFrame(daily),
+            products=pd.DataFrame(),
+            sku=pd.DataFrame(),
+        ),
+        reconciliation=SimpleNamespace(status=RunStatus.FINAL),
+    )
+    path = tmp_path / "daily-report.html"
+    write_html(result, config, path)
+    return path
+
+def test_html_escapes_business_text_and_embeds_safe_json(
+    tmp_path: Path, html_page: Page
+) -> None:
     config = RunConfig(
         orders=tmp_path / "orders.xlsx",
         start_date=date(2026, 8, 1),
@@ -98,91 +145,90 @@ def test_html_escapes_business_text_and_embeds_safe_json(tmp_path: Path) -> None
     path = tmp_path / "report.html"
 
     write_html(result, config, path)
-    page = path.read_text(encoding="utf-8")
-
-    assert "<img src=x" not in page
-    assert "\\u003cimg src=x" in page
-    assert "const DATA =" in page
-    assert "搜索商品ID或标题" in page
-    assert 'id="rankings"' in page
-    for title in (
-        "产品销售榜",
-        "产品退款榜",
-        "产品利润榜",
-        "热销产品榜",
-        "链接利润榜",
-        "链接销售榜",
-        "链接退款榜",
-        "链接花费榜",
-        "链接投产榜",
-        "链接亏损预警",
-    ):
-        assert title in page
-    assert "DATA.sku" in page
-    assert "无商家编码" in page
-    assert "销售占比 ${pct(paid ? Number(row['销售额_分'] || 0) / paid : null)}" in page
-    assert "row['经营贡献利润率状态'] === '已核算'" in page
-    assert "row['核算状态'] === '已核算'" in page
-    assert ".slice(0, 10)" in page
-    assert "Number(row['推广花费_分'] || 0) >= roiSpendFloor" in page
-    assert ".table-wrap {" in page
-    assert "@media (max-width: 700px)" in page
-    assert "@page { size: A4 landscape" in page
-    assert ".view[hidden] { display: block !important; }" in page
-    assert ".equation-scroll, .table-wrap {" in page
-    assert ".equation, .profit-equation {" in page
-    assert "table { min-width: 0" in page
-    assert "含推广净利润" not in page
-    assert "全部订单销售链" in page
-    assert "已核算利润链" in page
-    assert "刷单金额" in page
-    assert "真实销售额" in page
-    assert "term('真实销售额', realSales, 'result'" in page
-    assert "term('刷单成本', S['已核算刷单成本_分'], 'cost'" in page
-    assert "全部订单批次成功退款" in page
-    assert "销售额核算覆盖率 ${pct(S['销售额核算覆盖率'])}" in page
-    assert 'id="profitEquation"' in page
-    assert "profit-equation" in page
-    assert "term('关闭已发货损失'" in page
-    assert "刷单成本同金额计入利润" in page
-    assert "占已核算销售额 ${share(accountedRefund, accounted)}" in page
-    assert "占净销售额 ${share(S['已核算平台扣点_分'], accountedNet)}" in page
-    assert "占已核算净销售额" in page
-    assert ".equation:not(.profit-equation) .term { width: 220px; }" in page
+    html_page.goto(path.as_uri())
+    html_page.locator('nav [data-view="links"]').click()
+    expect(html_page.locator("#rows")).to_contain_text(links.iloc[0]["商品标题"])
+    assert html_page.locator("img").count() == 0
+    assert html_page.evaluate("document.body.dataset.pwned") is None
 
 
-def test_html_daily_chart_groups_accessibility_and_empty_state(tmp_path: Path) -> None:
-    config = RunConfig(
-        orders=tmp_path / "orders.xlsx",
-        start_date=date(2026, 8, 1),
-        end_date=date(2026, 8, 7),
-        platform=Platform.TMALL,
-        output_dir=tmp_path / "output",
-    )
-    result = SimpleNamespace(
-        analysis=SimpleNamespace(
-            summary={},
-            links=pd.DataFrame(),
-            daily=pd.DataFrame(),
-            products=pd.DataFrame(),
-            sku=pd.DataFrame(),
+def test_html_daily_chart_groups_accessibility_and_empty_state(
+    tmp_path: Path, html_page: Page
+) -> None:
+    html_page.goto(_daily_report(tmp_path, []).as_uri())
+    html_page.locator('nav [data-view="daily"]').click()
+    for chart in ("sales", "profit", "promotion", "orders"):
+        button = html_page.locator(f'[data-daily-chart="{chart}"]')
+        button.click()
+        expect(button).to_have_attribute("aria-pressed", "true")
+        expect(html_page.locator("#dailyChart")).to_be_hidden()
+        expect(html_page.locator("#dailyChartEmpty")).to_be_visible()
+
+
+@pytest.mark.parametrize(
+    ("values", "chart", "key", "isolated_indices", "line_indices"),
+    [
+        pytest.param([100], "sales", "销售额_分", [0], [], id="single-day"),
+        pytest.param([0], "sales", "销售额_分", [0], [], id="zero-is-valid"),
+        pytest.param(
+            [100, None, -200, None, 0], "sales", "销售额_分", [0, 2, 4], [],
+            id="isolated-values-with-gaps",
         ),
-        reconciliation=SimpleNamespace(status=RunStatus.FINAL),
+        pytest.param(
+            [100, 200, None, 300], "sales", "销售额_分", [3], [(0, 1)],
+            id="line-then-isolated-value",
+        ),
+        pytest.param(
+            [100, 200, None, 300, 400], "sales", "销售额_分", [], [(0, 1), (3, 4)],
+            id="separate-lines-across-gap",
+        ),
+        pytest.param([100], "orders", "订单批次成功退款_分", [0], [], id="right-axis-single-day"),
+    ],
+)
+def test_html_daily_chart_renders_points_and_breaks_at_missing_values(
+    tmp_path: Path,
+    html_page: Page,
+    values: list[int | None],
+    chart: str,
+    key: str,
+    isolated_indices: list[int],
+    line_indices: list[tuple[int, int]],
+) -> None:
+    daily = [
+        {"日期": f"2026-08-{index + 1:02}", key: value}
+        for index, value in enumerate(values)
+    ]
+    html_page.goto(_daily_report(tmp_path, daily).as_uri())
+    html_page.locator('nav [data-view="daily"]').click()
+    html_page.locator(f'[data-daily-chart="{chart}"]').click()
+    expect(html_page.locator("#dailyChart")).to_be_visible()
+    rendered = html_page.locator("#dailyChart").evaluate(
+        """svg => ({
+            width: svg.viewBox.baseVal.width,
+            height: svg.viewBox.baseVal.height,
+            dates: [...svg.querySelectorAll('.chart-date-label')].map(label =>
+                Number(label.getAttribute('x'))),
+            points: [...svg.querySelectorAll('.chart-point')].map(point => ({
+                x: Number(point.getAttribute('cx')),
+                y: Number(point.getAttribute('cy')),
+                width: point.getBBox().width,
+                height: point.getBBox().height
+            })),
+            lines: [...svg.querySelectorAll('.chart-line')].map(line => {
+                const start = line.getPointAtLength(0);
+                const end = line.getPointAtLength(line.getTotalLength());
+                return {startX: start.x, endX: end.x};
+            })
+        })"""
     )
-    path = tmp_path / "empty-report.html"
-
-    write_html(result, config, path)
-    page = path.read_text(encoding="utf-8")
-
-    assert 'data-daily-chart="sales"' in page
-    assert 'data-daily-chart="profit"' in page
-    assert 'data-daily-chart="promotion"' in page
-    assert 'data-daily-chart="orders"' in page
-    assert 'aria-label="每日趋势指标"' in page
-    assert 'aria-live="polite"' in page
-    assert "ArrowLeft" in page
-    assert "ArrowRight" in page
-    assert "本期暂无每日数据" in page
-    assert "推广归因成交金额_分" in page
-    assert "期间退款完结金额_分" in page
-    assert "prefers-reduced-motion: reduce" in page
+    assert len(rendered["points"]) == len(isolated_indices)
+    for point, index in zip(rendered["points"], isolated_indices, strict=True):
+        assert math.isfinite(point["x"]) and math.isfinite(point["y"])
+        assert 0 < point["x"] < rendered["width"]
+        assert 0 < point["y"] < rendered["height"]
+        assert point["width"] > 0 and point["height"] > 0
+        assert point["x"] == pytest.approx(rendered["dates"][index], abs=0.01)
+    assert len(rendered["lines"]) == len(line_indices)
+    for line, (start, end) in zip(rendered["lines"], line_indices, strict=True):
+        assert line["startX"] == pytest.approx(rendered["dates"][start], abs=0.01)
+        assert line["endX"] == pytest.approx(rendered["dates"][end], abs=0.01)

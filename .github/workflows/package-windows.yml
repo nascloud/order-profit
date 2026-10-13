@@ -54,6 +54,8 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             uv pip install --python .venv/Scripts/python.exe -e '.[dev,build]' pyautogui Pillow psutil
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            & .venv/Scripts/python.exe -m playwright install chromium
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           } finally { Stop-Transcript }
       - name: Run full test suite
         run: |
