@@ -58,6 +58,7 @@ exe_name="order-profit-cli-v${version}-macos-x86_64"
     --hidden-import openpyxl \
     --hidden-import xlrd \
     --collect-data tzdata \
+    --collect-data order_profit \
     --name "$exe_name" \
     --paths src \
     src/order_profit/__main__.py
@@ -83,6 +84,7 @@ app_name="订单利润核算-v${version}-macos-x86_64"
     --hidden-import openpyxl \
     --hidden-import xlrd \
     --collect-data tzdata \
+    --collect-data order_profit \
     --icon "$icon_tmp/app.icns" \
     --osx-bundle-identifier com.nascloud.order-profit \
     --specpath "$root/build/macos-ui" \
