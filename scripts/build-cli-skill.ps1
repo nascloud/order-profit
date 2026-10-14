@@ -41,6 +41,7 @@ $arguments = @(
     "--hidden-import", "openpyxl"
     "--hidden-import", "xlrd"
     "--collect-data", "tzdata"
+    "--collect-data", "order_profit"
     "src\order_profit\__main__.py"
 )
 if ($Clean) {
