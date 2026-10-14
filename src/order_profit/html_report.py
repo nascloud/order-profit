@@ -14,11 +14,13 @@ from order_profit.config import RunConfig
 
 REPORT_CSS = r"""
 :root {
+  color-scheme: light;
   --ink: #17202a;
-  --muted: #65727e;
+  --muted: #55656f;
   --line: #d9e0e5;
   --paper: #f5f7f8;
-  --panel: #fff;
+  --panel: #fdfefe;
+  --tint: #eaf4ef;
   --brand: #176b54;
   --warn: #a65d00;
   --bad: #b42318;
@@ -28,7 +30,7 @@ body {
   margin: 0;
   background: var(--paper);
   color: var(--ink);
-  font: 14px/1.45 Arial, "Microsoft YaHei", sans-serif;
+  font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
   letter-spacing: 0;
 }
 header {
@@ -36,26 +38,38 @@ header {
   justify-content: space-between;
   align-items: end;
   gap: 16px;
-  padding: 18px 28px;
+  padding: 26px max(28px, calc((100vw - 1400px) / 2 + 28px));
   background: #fff;
   border-bottom: 1px solid var(--line);
 }
-h1 { margin: 0; font-size: 24px; }
+h1 { margin: 0 0 4px; font-size: 26px; letter-spacing: -.04em; }
+.period { color: var(--muted); }
+.status { display: inline-block; color: var(--brand); font-size: 13px; }
+.status.provisional { color: #925000; }
+.notice { margin: 0 0 20px; padding: 12px 16px; background: #fff3df;
+  color: #764000; border-left: 3px solid var(--warn); border-radius: 8px; }
 .meta { color: var(--muted); text-align: right; }
 nav {
   position: sticky;
   top: 0;
-  z-index: 3;
+  z-index: 3; /* Layers: table headers 1, sticky navigation 3. */
   display: flex;
   gap: 4px;
-  padding: 10px 28px;
+  padding: 6px max(28px, calc((100vw - 1400px) / 2 + 28px));
   background: #fff;
   border-bottom: 1px solid var(--line);
 }
 button, select, input { font: inherit; }
+button { color: var(--ink); white-space: nowrap; }
+button:active { transform: scale(.98); }
+button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible {
+  outline: 2px solid var(--brand); outline-offset: 3px;
+}
+a { color: var(--brand); }
 nav button {
-  padding: 9px 14px;
+  padding: 12px 16px;
   border: 0;
+  border-bottom: 2px solid transparent;
   background: transparent;
   cursor: pointer;
 }
@@ -64,57 +78,67 @@ nav button.active {
   border-bottom: 2px solid var(--brand);
   font-weight: 700;
 }
-main { max-width: 1600px; margin: auto; padding: 22px 28px 40px; }
+main { max-width: 1400px; margin: auto; padding: 28px 28px 48px; }
 .view[hidden] { display: none; }
+.view-heading { margin-bottom: 18px; }
+.view-heading h2 { margin: 0; font-size: 21px; }
+.view-heading p { margin: 4px 0 0; color: var(--muted); }
+.key-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 28px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; overflow: hidden; }
+.key-metrics .metric { padding: 22px; border: 0; border-right: 1px solid var(--line); }
+.key-metrics .metric:last-child { border-right: 0; }
+.key-metrics .primary { background: var(--tint); }
+.key-metrics .primary b { color: var(--brand); }
+.key-metrics .metric b { font-size: clamp(22px, 2.2vw, 32px); }
+.metric b, .term b, .rank-value, td { font-variant-numeric: tabular-nums; }
 .metrics {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
   margin-top: 22px;
 }
 .metric {
-  min-height: 96px;
-  padding: 14px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 6px;
+  min-width: 0;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
 }
 .metric span, .term span { color: var(--muted); }
-.metric b { display: block; margin: 7px 0 2px; font-size: 24px; }
+.metric b { display: block; margin: 8px 0 4px; font-size: 24px; overflow-wrap: anywhere; }
 .metric small, .term small { color: var(--muted); }
 .negative { color: var(--bad) !important; }
-.rankings { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line); }
+.rankings { margin-top: 36px; }
 .rankings-head, .calc-head {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
-  gap: 16px;
-  margin-bottom: 12px;
+  align-items: start;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 18px;
 }
 .rankings-head h2, .calc-head h2 { margin: 0; font-size: 18px; }
 .rankings-head span, .calc-head span { color: var(--muted); font-size: 12px; }
 .ranking-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 9px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
 }
 .ranking {
   min-width: 0;
-  padding: 11px;
+  padding: 18px;
   background: #fff;
   border: 1px solid var(--line);
-  border-top: 3px solid var(--brand);
-  border-radius: 6px;
+  border-radius: 8px;
 }
-.ranking.risk { border-top-color: var(--bad); }
-.ranking h3 { margin: 0 0 8px; font-size: 13px; }
+.ranking.risk h3 { color: var(--bad); }
+.ranking h3 { margin: 0 0 12px; font-size: 15px; }
 .ranking ol { margin: 0; padding: 0; list-style: none; counter-reset: rank; }
 .ranking li {
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr) auto;
   align-items: center;
   gap: 6px;
-  padding: 6px 0;
+  padding: 10px 0;
   border-top: 1px solid #edf0f2;
   counter-increment: rank;
 }
@@ -133,11 +157,10 @@ main { max-width: 1600px; margin: auto; padding: 22px 28px 40px; }
 .ranking li:first-child::before { color: #fff; background: var(--brand); }
 .ranking.risk li:first-child::before { background: var(--bad); }
 .rank-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rank-name small { display: block; color: var(--muted); font-size: 10px; }
+.rank-name small { display: block; color: var(--muted); font-size: 12px; }
 .rank-value { text-align: right; font-weight: 700; white-space: nowrap; }
-.ranking.empty { color: var(--muted); }
-.calc-section { padding: 18px 0 20px; border-top: 1px solid var(--line); }
-.calc-section:first-child { padding-top: 0; border-top: 0; }
+.ranking .empty { color: var(--muted); }
+.calc-section { padding: 24px 0; border-top: 1px solid var(--line); }
 .calc-head h2 { font-size: 17px; }
 .calc-head span { font-size: 13px; }
 .equation-scroll { overflow-x: auto; padding-bottom: 5px; }
@@ -164,28 +187,39 @@ main { max-width: 1600px; margin: auto; padding: 22px 28px 40px; }
   font-size: 25px;
   font-weight: 700;
 }
-.equation + .equation { margin-top: 14px; }
 .equation:not(.profit-equation) .term { width: 220px; }
 .equation:not(.profit-equation) .term span { white-space: nowrap; }
-.profit-equation .term { width: 132px; }
-.profit-equation .term.result { width: 190px; }
-.profit-equation .term b { font-size: 18px; }
-.profit-equation .operator { width: 28px; min-width: 28px; }
-.controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; }
+.profit-equation { display: grid; width: 100%; min-width: 0;
+  grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.profit-equation .term { width: auto; min-width: 0; padding: 14px 16px; }
+.profit-equation .term.result, .profit-equation .term:nth-child(3) { grid-column: span 2; }
+.profit-equation .term b { font-size: 21px; white-space: normal; overflow-wrap: anywhere; }
+.profit-equation .operator { display: none; }
+.profit-equation .term.cost span::before { content: "- "; color: var(--warn); }
+.formula-note { margin: 0 0 12px; color: var(--muted); font-size: 13px; }
+.controls { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px; margin: 0 0 16px; padding: 20px; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 8px; }
+.controls label { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-weight: 600; }
 .controls input, .controls select {
-  height: 36px;
-  padding: 0 10px;
-  background: #fff;
+  width: 100%; min-width: 0; height: 42px;
+  padding: 0 12px; color: var(--ink); background: var(--panel); font-weight: 400;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: 8px;
 }
-.controls input { min-width: 220px; }
+.controls input::placeholder { color: var(--muted); opacity: 1; }
+.filter-summary { display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 12px; color: var(--muted); }
+.reset { border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px 14px; background: var(--panel); cursor: pointer; }
+.reset:hover { border-color: var(--brand); color: var(--brand); }
+.empty-cell { padding: 40px 16px; text-align: left !important; color: var(--muted); }
 .daily-chart-panel {
   margin-bottom: 12px;
   padding: 18px;
   background: #fff;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 8px;
 }
 .daily-chart-head {
   display: flex;
@@ -281,40 +315,81 @@ main { max-width: 1600px; margin: auto; padding: 22px 28px 40px; }
   max-height: 68vh;
   background: #fff;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 8px;
 }
 table { width: 100%; min-width: 1100px; border-collapse: collapse; }
 th, td {
-  padding: 9px 10px;
+  padding: 12px 14px;
   border-bottom: 1px solid #edf0f2;
   text-align: right;
   white-space: nowrap;
 }
 th { position: sticky; top: 0; z-index: 1; color: #32463f; background: #eef3f1; }
+tbody tr:nth-child(even) { background: #f7fafb; }
+tbody tr:hover { background: var(--tint); }
 th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align: left; }
 td small { display: block; color: var(--muted); }
 .tag { color: var(--brand); font-weight: 700; }
+@media (min-width: 1280px) {
+  main:has(#products:not([hidden])), main:has(#links:not([hidden])) {
+    max-width: none;
+    padding-right: 24px;
+    padding-left: 24px;
+  }
+  #products table, #links table { min-width: 0; table-layout: fixed; }
+  #products th, #products td, #links th, #links td {
+    padding: 10px 5px;
+    font-size: 12px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    vertical-align: top;
+  }
+  #products th:first-child { width: 9%; }
+  #products th:nth-child(n+15) { width: 3%; }
+  #links th:first-child { width: 3%; }
+  #links th:nth-child(2) { width: 5%; }
+  #links th:nth-child(3) { width: 7%; }
+  #links th:nth-child(4) { width: 11%; }
+  #links th:last-child { width: 7%; }
+  #links td:nth-child(3), #links td:nth-child(4), #links td:last-child {
+    text-align: left;
+  }
+}
+@media (min-width: 1920px) {
+  #products th, #products td, #links th, #links td {
+    padding: 12px 4px;
+  }
+}
 footer {
   padding: 18px 28px;
   color: var(--muted);
   background: #fff;
   border-top: 1px solid var(--line);
 }
-@media (max-width: 1200px) {
+@media (max-width: 1100px) {
   .ranking-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .key-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .key-metrics .metric { border-bottom: 1px solid var(--line); }
+  .metrics, .controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
-@media (max-width: 700px) {
+@media (max-width: 767px) {
   header { align-items: start; flex-direction: column; padding: 14px 16px; }
   .meta { text-align: left; }
   nav, main { padding-right: 12px; padding-left: 12px; }
   nav { overflow: auto; }
   .metrics { grid-template-columns: 1fr 1fr; }
+  .key-metrics, .controls { grid-template-columns: 1fr; }
+  .key-metrics .metric { padding: 16px 20px; border-right: 0; }
+  .controls { padding: 16px; }
+  nav button { flex: none; padding: 12px; }
   .metric b { font-size: 20px; }
   .calc-head, .rankings-head { align-items: start; flex-direction: column; gap: 2px; }
   .ranking-grid { grid-template-columns: 1fr; }
   .equation { width: 100%; min-width: 0; flex-direction: column; }
   .term, .term.result, .equation:not(.profit-equation) .term,
   .profit-equation .term, .profit-equation .term.result { width: 100%; }
+  .profit-equation { grid-template-columns: 1fr; }
+  .profit-equation .term.result, .profit-equation .term:nth-child(3) { grid-column: auto; }
   .equation:not(.profit-equation) .term span { white-space: normal; }
   .operator, .profit-equation .operator { width: 100%; height: 30px; min-height: 30px; }
   .daily-chart-panel { padding: 12px; }
@@ -327,50 +402,6 @@ footer {
 }
 @media (prefers-reduced-motion: reduce) {
   .chart-controls button { transition: none; }
-}
-@page { size: A4 landscape; margin: 10mm; }
-@media print {
-  body { background: #fff; font-size: 9px; }
-  header { padding: 0 0 8mm; }
-  nav, .controls, .chart-controls, footer { display: none; }
-  main { max-width: none; padding: 0; }
-  .view[hidden] { display: block !important; }
-  .view + .view { break-before: page; }
-  .daily-chart-panel { margin: 0 0 8mm; padding: 0; border: 0; break-inside: avoid; }
-  .daily-chart-svg { max-height: 75mm; }
-  .daily-chart-readout { display: none; }
-  .calc-section { break-inside: avoid; }
-  .equation-scroll, .table-wrap { overflow: visible; max-height: none; border: 0; }
-  .equation, .profit-equation { width: 100%; min-width: 0; flex-direction: row !important; }
-  .term, .term.result, .equation:not(.profit-equation) .term,
-  .profit-equation .term, .profit-equation .term.result {
-    width: auto;
-    min-width: 0;
-    min-height: 0;
-    flex: 1;
-    padding: 7px 5px;
-  }
-  .term.result, .profit-equation .term.result { flex: 1.2; }
-  .term span, .equation:not(.profit-equation) .term span { white-space: normal; }
-  .term b, .profit-equation .term b { font-size: 12px; white-space: normal; }
-  .operator, .profit-equation .operator {
-    width: 18px;
-    min-width: 18px;
-    height: auto;
-    min-height: 0;
-    font-size: 14px;
-  }
-  .metrics { grid-template-columns: repeat(3, 1fr); }
-  .metric { min-height: 0; padding: 8px; break-inside: avoid; }
-  .metric b { font-size: 15px; }
-  .rankings { margin-top: 0; padding-top: 0; border: 0; break-before: page; }
-  .ranking-grid { grid-template-columns: repeat(3, 1fr); }
-  .ranking { padding: 7px; break-inside: avoid; }
-  .ranking li { padding: 3px 0; }
-  table { min-width: 0; table-layout: auto; font-size: 7px; }
-  th, td { padding: 3px 2px; white-space: normal; overflow-wrap: anywhere; }
-  th { position: static; }
-  tr { break-inside: avoid; }
 }
 """
 
@@ -392,6 +423,7 @@ document.querySelectorAll('nav button').forEach(button => {
   button.addEventListener('click', () => {
     document.querySelectorAll('nav button').forEach(item => {
       item.classList.toggle('active', item === button);
+      item.setAttribute('aria-pressed', String(item === button));
     });
     document.querySelectorAll('.view').forEach(view => {
       view.hidden = view.id !== button.dataset.view;
@@ -413,6 +445,18 @@ const brush = S['刷单金额_分'] || 0;
 const allRefund = S['订单批次成功退款金额_分'] || 0;
 const realSales = S['真实销售额_分'] || 0;
 const share = (value, base) => pct(base ? value / base : null);
+const keyMetrics = [
+  ['真实销售额', money(S['真实销售额_分']), '扣除刷单金额与订单批次退款'],
+  [profitTitle, money(S['含推广经营贡献利润_分']), '已扣除推广花费'],
+  ['经营贡献利润率', pct(S['经营贡献利润率']), '已核算部分口径'],
+  ['销售额核算覆盖率', pct(S['销售额核算覆盖率']), '衡量成本与运费核算完整性']
+];
+document.querySelector('#keyMetrics').innerHTML = keyMetrics.map((item, index) =>
+  `<div class="metric${index === 1 ? ' primary' : ''}"><span>${item[0]}</span>` +
+  `<b class="${(index === 1 && S['含推广经营贡献利润_分'] < 0) ||
+    (index === 2 && S['经营贡献利润率'] < 0) ? 'negative' : ''}">${item[1]}</b>` +
+  `<small>${item[2]}</small></div>`
+).join('');
 
 document.querySelector('#salesEquation').innerHTML =
   term('真实销售额', realSales, 'result', `占已付款销售额 ${share(realSales, paid)}`) +
@@ -824,7 +868,9 @@ function table(element, rows, columns) {
       : esc(row[column[1]] ?? '--');
     return `<td>${value}</td>`;
   }).join('') + '</tr>').join('');
-  node.innerHTML = head + `<tbody>${body}</tbody>`;
+  const emptyText = element === '#dailyTable' ? '本期暂无每日数据' : '本期暂无产品数据';
+  node.innerHTML = head + `<tbody>${body ||
+    `<tr><td class="empty-cell" colspan="${columns.length}">${emptyText}</td></tr>`}</tbody>`;
 }
 const M = value => money(value);
 const P = value => pct(value);
@@ -895,6 +941,8 @@ function renderLinks() {
   };
   const [key, direction] = sorts[controls[6].value];
   rows.sort((a, b) => ((a[key] ?? -Infinity) - (b[key] ?? -Infinity)) * direction);
+  document.querySelector('#linkCount').textContent =
+    `匹配 ${rows.length} / ${DATA.links.length} 个链接`;
   document.querySelector('#rows').innerHTML = rows.map(row => '<tr>' +
     columns.map(column => {
       let value = column[2]
@@ -906,9 +954,15 @@ function renderLinks() {
       const negative = row['含推广经营贡献利润_分'] < 0 &&
         column[1] === '含推广经营贡献利润_分';
       return `<td class="${negative ? 'negative' : ''}">${value}</td>`;
-    }).join('') + '</tr>').join('');
+    }).join('') + '</tr>').join('') ||
+    `<tr><td class="empty-cell" colspan="${columns.length}">` +
+    '没有匹配的链接，请调整或重置筛选条件。</td></tr>';
 }
 controls.forEach(control => control.addEventListener('input', renderLinks));
+document.querySelector('#resetFilters').addEventListener('click', () => {
+  controls.forEach(control => { control.value = control.id === 'sort' ? 'profitDesc' : ''; });
+  renderLinks();
+});
 renderLinks();
 """
 
@@ -956,6 +1010,12 @@ def write_html(result: Any, config: RunConfig, path: Path) -> None:
     data = _json_for_script(payload)
     status = html.escape(result.reconciliation.status.value)
     profit_title = "已核算部分经营贡献利润" if status == "PROVISIONAL" else "含推广经营贡献利润"
+    status_label = "待补成本 / 运费" if status == "PROVISIONAL" else "核算完整"
+    notice = (
+        '<div class="notice" role="note">成本或运费尚未补齐，利润仅反映已核算部分，'
+        '不得作为最终利润。请补齐待补清单后重新生成报告。</div>'
+        if status == "PROVISIONAL" else ""
+    )
     script = REPORT_SCRIPT.replace("__REPORT_DATA__", data).replace(
         "__PROFIT_TITLE__", _json_for_script(profit_title)
     )
@@ -973,22 +1033,25 @@ def write_html(result: Any, config: RunConfig, path: Path) -> None:
   <header>
     <div>
       <h1>店铺经营复盘</h1>
-      <div>{config.start_date.isoformat()} 至 {config.end_date.isoformat()}</div>
+      <div class="period">{config.start_date.isoformat()} 至 {config.end_date.isoformat()}</div>
     </div>
     <div class="meta">
-      <b>{status}</b><br>
-      {html.escape(config.platform.value)} · 平台费 {config.platform_fee_rate:.2%}
-      · 税赋 {config.tax_rate:.2%}
+      <b class="status {status.lower()}">{status} · {status_label}</b><br>
+      {html.escape(config.platform.value)}　平台费 {config.platform_fee_rate:.2%}
+     　税赋 {config.tax_rate:.2%}
     </div>
   </header>
-  <nav>
-    <button class="active" data-view="overview">经营总览</button>
-    <button data-view="daily">每日经营</button>
-    <button data-view="products">产品分析</button>
-    <button data-view="links">链接分析</button>
+  <nav aria-label="报告视图">
+    <button class="active" data-view="overview" aria-controls="overview"
+      aria-pressed="true">经营总览</button>
+    <button data-view="daily" aria-controls="daily" aria-pressed="false">每日经营</button>
+    <button data-view="products" aria-controls="products" aria-pressed="false">产品分析</button>
+    <button data-view="links" aria-controls="links" aria-pressed="false">链接分析</button>
   </nav>
   <main>
+    {notice}
     <section id="overview" class="view">
+      <div class="key-metrics" id="keyMetrics" aria-label="核心经营指标"></div>
       <div class="calc-section">
         <div class="calc-head">
           <h2>全部订单销售链</h2><span>按订单付款日期归属</span>
@@ -1001,8 +1064,9 @@ def write_html(result: Any, config: RunConfig, path: Path) -> None:
         </div>
         <div class="equation-scroll">
           <div class="equation" id="accountedEquation"></div>
-          <div class="equation profit-equation" id="profitEquation"></div>
         </div>
+        <p class="formula-note">经营贡献利润 = 已核算净销售额 - 以下各项成本与费用</p>
+        <div class="equation profit-equation" id="profitEquation"></div>
       </div>
       <div class="metrics" id="summaryMetrics"></div>
       <section class="rankings">
@@ -1041,40 +1105,49 @@ def write_html(result: Any, config: RunConfig, path: Path) -> None:
       <div class="table-wrap"><table id="dailyTable"></table></div>
     </section>
     <section id="products" class="view" hidden>
+      <div class="view-heading"><h2>产品分析</h2><p>对比产品销售规模、退款与经营贡献利润。</p></div>
       <div class="table-wrap"><table id="productTable"></table></div>
     </section>
     <section id="links" class="view" hidden>
+      <div class="view-heading"><h2>链接分析</h2>
+        <p>筛选问题链接，结合核算状态与运营动作复核。</p></div>
       <div class="controls">
-        <input id="search" type="search" placeholder="搜索商品ID或标题">
-        <select id="productFilter"><option value="">全部产品</option></select>
-        <select id="sabc"><option value="">全部 SABC</option></select>
-        <select id="profit">
+        <label for="search">商品搜索
+          <input id="search" type="search" placeholder="商品ID或标题"></label>
+        <label for="productFilter">产品
+          <select id="productFilter"><option value="">全部产品</option></select></label>
+        <label for="sabc">SABC等级
+          <select id="sabc"><option value="">全部 SABC</option></select></label>
+        <label for="profit">盈亏状态<select id="profit">
           <option value="">全部盈亏</option><option>盈利</option><option>亏损</option>
           <option>持平</option><option>待核算</option>
-        </select>
-        <select id="coverage">
+        </select></label>
+        <label for="coverage">数据覆盖<select id="coverage">
           <option value="">全部覆盖</option><option>订单+推广</option><option>仅订单</option>
           <option>仅推广</option>
-        </select>
-        <select id="accounting">
+        </select></label>
+        <label for="accounting">核算状态<select id="accounting">
           <option value="">全部核算状态</option><option>已核算</option>
           <option>成本或运费缺失</option>
-        </select>
-        <select id="sort">
+        </select></label>
+        <label for="sort">排序方式<select id="sort">
           <option value="profitDesc">经营贡献利润：高到低</option>
           <option value="salesDesc">销售额：高到低</option>
           <option value="marginDesc">经营贡献利润率：高到低</option>
           <option value="spendDesc">推广花费：高到低</option>
           <option value="roiDesc">推广投产比：高到低</option>
           <option value="refundDesc">退款率：高到低</option>
-        </select>
+        </select></label>
       </div>
+      <div class="filter-summary"><span id="linkCount" role="status" aria-live="polite"></span>
+        <button id="resetFilters" class="reset" type="button">重置筛选</button></div>
       <div class="table-wrap">
         <table><thead id="linkHead"></thead><tbody id="rows"></tbody></table>
       </div>
     </section>
   </main>
   <footer>
+    推广归因成交金额不计入订单销售额。
     平台扣点与综合税赋为管理估算值。产品推广数据为链接级分摊估算。
     SABC 阈值：{config.s_profit_share:.0%}/{config.a_profit_share:.0%}；
     配置：{html.escape(str(config.sabc_config or "默认"))}。

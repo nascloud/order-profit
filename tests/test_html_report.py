@@ -35,7 +35,9 @@ def html_page(html_browser: Browser) -> Iterator[Page]:
         page.close()
 
 
-def _daily_report(tmp_path: Path, daily: list[dict[str, object]]) -> Path:
+def _daily_report(
+    tmp_path: Path, daily: list[dict[str, object]], status: RunStatus = RunStatus.FINAL
+) -> Path:
     config = RunConfig(
         orders=tmp_path / "orders.xlsx",
         start_date=date(2026, 8, 1),
@@ -51,7 +53,7 @@ def _daily_report(tmp_path: Path, daily: list[dict[str, object]]) -> Path:
             products=pd.DataFrame(),
             sku=pd.DataFrame(),
         ),
-        reconciliation=SimpleNamespace(status=RunStatus.FINAL),
+        reconciliation=SimpleNamespace(status=status),
     )
     path = tmp_path / "daily-report.html"
     write_html(result, config, path)
@@ -146,10 +148,32 @@ def test_html_escapes_business_text_and_embeds_safe_json(
 
     write_html(result, config, path)
     html_page.goto(path.as_uri())
+    expect(html_page.locator("#keyMetrics .primary")).to_contain_text("¥46.70")
+    expect(html_page.locator("#keyMetrics")).to_contain_text("46.70%")
     html_page.locator('nav [data-view="links"]').click()
     expect(html_page.locator("#rows")).to_contain_text(links.iloc[0]["商品标题"])
     assert html_page.locator("img").count() == 0
     assert html_page.evaluate("document.body.dataset.pwned") is None
+    expect(html_page.locator("#linkCount")).to_have_text("匹配 1 / 1 个链接")
+    html_page.get_by_label("商品搜索", exact=True).fill("不存在的商品")
+    expect(html_page.locator("#linkCount")).to_have_text("匹配 0 / 1 个链接")
+    html_page.get_by_role("button", name="重置筛选").click()
+    expect(html_page.locator("#linkCount")).to_have_text("匹配 1 / 1 个链接")
+    for width in (1280, 1440, 1920, 2560):
+        html_page.set_viewport_size({"width": width, "height": 1000})
+        for view in ("products", "links"):
+            html_page.locator(f'nav [data-view="{view}"]').click()
+            assert html_page.locator(f'#{view} .table-wrap').evaluate(
+                "node => node.scrollWidth <= node.clientWidth + 1"
+            )
+    assert html_page.locator("main").bounding_box()["width"] > 2400
+
+
+def test_report_provisional_warning(tmp_path: Path, html_page: Page) -> None:
+    html_page.goto(_daily_report(tmp_path, [], RunStatus.PROVISIONAL).as_uri())
+    expect(html_page.get_by_role("note")).to_contain_text("不得作为最终利润")
+    expect(html_page.locator("#keyMetrics .primary")).to_contain_text("已核算部分经营贡献利润")
+    expect(html_page.locator(".status")).to_contain_text("PROVISIONAL")
 
 
 def test_html_daily_chart_groups_accessibility_and_empty_state(
@@ -163,6 +187,45 @@ def test_html_daily_chart_groups_accessibility_and_empty_state(
         expect(button).to_have_attribute("aria-pressed", "true")
         expect(html_page.locator("#dailyChart")).to_be_hidden()
         expect(html_page.locator("#dailyChartEmpty")).to_be_visible()
+
+
+def test_report_visual_hierarchy_and_filter_empty_state(tmp_path: Path, html_page: Page) -> None:
+    html_page.goto(_daily_report(tmp_path, []).as_uri())
+    expect(html_page.locator("#keyMetrics")).to_be_visible()
+    expect(html_page.locator("#keyMetrics")).to_contain_text("销售额核算覆盖率")
+    assert html_page.locator("#profitEquation").evaluate(
+        "node => node.scrollWidth <= node.parentElement.clientWidth"
+    )
+    expect(html_page.locator('nav [data-view="overview"]')).to_have_attribute(
+        "aria-pressed", "true"
+    )
+    html_page.get_by_role("button", name="链接分析", exact=True).click()
+    expect(html_page.locator('nav [data-view="overview"]')).to_have_attribute(
+        "aria-pressed", "false"
+    )
+    html_page.get_by_label("商品搜索", exact=True).fill("不存在的商品")
+    expect(html_page.locator("#linkCount")).to_have_text("匹配 0 / 0 个链接")
+    expect(html_page.locator("#rows")).to_contain_text("没有匹配的链接")
+    html_page.get_by_role("button", name="重置筛选").click()
+    expect(html_page.get_by_label("商品搜索", exact=True)).to_have_value("")
+    html_page.get_by_role("button", name="产品分析", exact=True).click()
+    expect(html_page.locator("#productTable")).to_contain_text("本期暂无产品数据")
+
+
+def test_report_stays_light_and_fits_mobile(tmp_path: Path, html_page: Page) -> None:
+    html_page.goto(_daily_report(tmp_path, []).as_uri())
+    light = html_page.evaluate("getComputedStyle(document.body).backgroundColor")
+    html_page.emulate_media(color_scheme="dark")
+    dark = html_page.evaluate("getComputedStyle(document.body).backgroundColor")
+    assert light == dark
+    for width in (390, 768, 1024):
+        html_page.set_viewport_size({"width": width, "height": 844})
+        for view in ("overview", "daily", "products", "links"):
+            html_page.locator(f'nav [data-view="{view}"]').click()
+            assert html_page.evaluate(
+                "document.documentElement.scrollWidth <= window.innerWidth"
+            )
+    assert "@media print" not in html_page.locator("style").inner_text()
 
 
 @pytest.mark.parametrize(
