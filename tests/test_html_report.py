@@ -109,6 +109,20 @@ def test_libraries_are_embedded_and_offline(tmp_path: Path, html_page: Page) -> 
     expect(html_page.locator("#libraryLicenses")).to_contain_text("Apache")
 
 
+def test_packaged_browser_acceptance(tmp_path: Path) -> None:
+    import runpy
+    from concurrent.futures import ThreadPoolExecutor
+
+    checker = runpy.run_path(str(Path(__file__).resolve().parents[1] /
+                                 "scripts/check-report-browser.py"))["check_report_browser"]
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        result = executor.submit(
+            checker, report(tmp_path, daily=[{"日期": "2026-08-01", "销售额_分": 100}]),
+            tmp_path / "browser.png"
+        ).result()
+    assert result["status"] == "passed"
+
+
 def test_column_presets_custom_columns_filters_sort_and_details(
     tmp_path: Path, html_page: Page
 ) -> None:

@@ -79,7 +79,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: order-profit-v0.2.4-windows-x86_64
+          name: order-profit-v0.2.5-windows-x86_64
           if-no-files-found: warn
           retention-days: 14
           path: |
@@ -89,3 +89,4 @@ jobs:
             dist/*.json
             dist/*.log
             dist/*.xml
+            dist/*-report.html

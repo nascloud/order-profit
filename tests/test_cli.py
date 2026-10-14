@@ -22,6 +22,10 @@ def test_version_option(capsys: pytest.CaptureFixture[str]) -> None:
     assert __version__ in capsys.readouterr().out
 
 
+def test_report_release_version() -> None:
+    assert __version__ == "0.2.5"
+
+
 def test_no_command_prints_help(capsys: pytest.CaptureFixture[str]) -> None:
     assert main([]) == 0
     assert "validate-inputs" in capsys.readouterr().out

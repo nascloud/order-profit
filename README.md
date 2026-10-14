@@ -49,7 +49,7 @@ Windows 和 macOS 桌面界面使用 Python 标准库 Tkinter，无额外 Web �
 .\scripts\build-windows.ps1 -Clean
 ```
 
-脚本使用 `uv` 安装打包依赖，嵌入 `assets/app-icon.ico`，并生成 `dist/订单利润核算-v0.2.4.exe`。随后调用 `scripts/build-cli-skill.ps1`，生成独立 CLI `dist/order-profit-cli-v0.2.4.exe` 和技能包 `dist/order-profit-cli-skill-v0.2.4.zip`；CLI 与 UI 均须包含 XLS/XLSX 读取依赖及业务时区数据。`build/`、`dist/` 和 PyInstaller 临时配置均不提交 Git。
+脚本使用 `uv` 安装打包依赖，嵌入 `assets/app-icon.ico`，并生成 `dist/订单利润核算-v0.2.5.exe`。随后调用 `scripts/build-cli-skill.ps1`，生成独立 CLI `dist/order-profit-cli-v0.2.5.exe` 和技能包 `dist/order-profit-cli-skill-v0.2.5.zip`；CLI 与 UI 均须包含 XLS/XLSX 读取依赖、业务时区数据和报表前端资源。`build/`、`dist/` 和 PyInstaller 临时配置均不提交 Git。
 
 Windows 必须在原生 Windows x86_64 环境构建，不在 macOS 上交叉打包。`.github/workflows/package-windows.yml` 提供原生 runner 构建、回归和产物上传；临时 `package-*` 分支可用于打包当前本地源码快照，不改动 `main`，快照不包含 `data/`、`output/` 或 `测试数据/`。发布验收包括实际启动 UI 并检查窗口，以及独立 CLI 和解压技能包运行核算、核对运费场景与输出报告。
 
@@ -59,7 +59,9 @@ Windows 必须在原生 Windows x86_64 环境构建，不在 macOS 上交叉打�
 
 ## macOS x86_64 UI、CLI 与技能包打包
 
-支持 Intel Mac 的 `.app` 桌面程序和独立命令行程序，运行时不需要安装 Python。本次发布版本为 `0.2.4`，以 `macos-x86_64` 后缀区分平台；不是 Apple Silicon 原生程序。UI 与 CLI 是独立入口，技能包调用 CLI。
+支持 Intel Mac 的 `.app` 桌面程序和独立命令行程序，运行时不需要安装 Python。本次发布版本为 `0.2.5`，以 `macos-x86_64` 后缀区分平台；不是 Apple Silicon 原生程序。UI 与 CLI 是独立入口，技能包调用 CLI。
+
+`0.2.5` 合并 ECharts / Tabulator 离线报表重构：BI 总览、利润公式卡片、可选明细列、行详情、产品背靠背排行和链接指标双榜。双平台 UI、CLI 与技能包必须包含 `order_profit/web/`；验收需实际打开独立程序生成的 HTML，验证离线图表和列切换，不只检查源代码测试。
 
 `0.2.3` 纳入规范 `1.2` 的订单号运费汇总匹配，以及混合刷单明细不占实际运费分摊份额的修复。发布验收须覆盖独立 CLI 和解压技能包的实际调用：子母单、同订单混合刷单/普通明细、刷单/关闭已发货明细、纯刷单正常订单；金额口径见[开发文档第 5.3、7.5 节](docs/订单利润核算标准化程序开发文档.md)。
 
@@ -76,17 +78,17 @@ bash scripts/build-macos-x86_64.sh --clean
 生成文件：
 
 ```text
-dist/order-profit-cli-v0.2.4-macos-x86_64
-dist/订单利润核算-v0.2.4-macos-x86_64.app
-dist/订单利润核算-v0.2.4-macos-x86_64.app.zip
-dist/order-profit-cli-skill-v0.2.4-macos-x86_64.zip
+dist/order-profit-cli-v0.2.5-macos-x86_64
+dist/订单利润核算-v0.2.5-macos-x86_64.app
+dist/订单利润核算-v0.2.5-macos-x86_64.app.zip
+dist/order-profit-cli-skill-v0.2.5-macos-x86_64.zip
 ```
 
 直接运行：
 
 ```bash
-./dist/order-profit-cli-v0.2.4-macos-x86_64 --version
-./dist/order-profit-cli-v0.2.4-macos-x86_64 run \
+./dist/order-profit-cli-v0.2.5-macos-x86_64 --version
+./dist/order-profit-cli-v0.2.5-macos-x86_64 run \
   --orders '订单.xlsx' \
   --costs '成本编码表.xlsx' \
   --freight '运费.xls' \

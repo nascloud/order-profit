@@ -17,6 +17,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import runpy
 import shutil
 import subprocess
 import tempfile
@@ -147,9 +148,13 @@ def check_report(output: Path, freight: Path, dist: Path, label: str) -> dict:
         book.close()
     html = (output / "店铺经营复盘.html").read_text(encoding="utf-8")
     require("FINAL" in html and "店铺经营复盘" in html, f"{label}: missing HTML report")
+    browser_check = runpy.run_path(str(Path(__file__).with_name("check-report-browser.py")))[
+        "check_report_browser"
+    ](output / "店铺经营复盘.html", dist / f"{label}-report-browser.png")
+    shutil.copy2(output / "店铺经营复盘.html", dist / f"{label}-report.html")
     return {"status": "passed", "freight_cents_by_product": actual,
-            "expected_summary": expected_summary, "warning": warning,
-            "reconciliation": checks}
+             "expected_summary": expected_summary, "warning": warning,
+             "reconciliation": checks, "browser": browser_check}
 
 
 def packaged_environment() -> dict[str, str]:
